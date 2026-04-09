@@ -17,9 +17,9 @@ from database import get_db, load_oauth_token, save_oauth_token, upsert_metric
 
 logger = logging.getLogger(__name__)
 
-TOKEN_URL = "https://api.whoop.com/oauth/oauth2/token"
-BASE_URL = "https://api.whoop.com/developer/v1"
-AUTHORIZE_URL = "https://api.whoop.com/oauth/oauth2/auth"
+TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
+BASE_URL = "https://api.prod.whoop.com/developer/v1"
+AUTHORIZE_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
 
 
 def _get_session(db_path: Optional[str] = None) -> Optional[OAuth2Session]:
