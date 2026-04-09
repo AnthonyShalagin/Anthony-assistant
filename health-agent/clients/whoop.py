@@ -229,7 +229,9 @@ def complete_auth(authorization_response: str, db_path: Optional[str] = None) ->
     token = session.fetch_token(
         TOKEN_URL,
         authorization_response=authorization_response,
+        client_id=WHOOP_CLIENT_ID,
         client_secret=WHOOP_CLIENT_SECRET,
+        include_client_id=True,
     )
     db_kwargs = {"db_path": db_path} if db_path else {}
     with get_db(**db_kwargs) as conn:
