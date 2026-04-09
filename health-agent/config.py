@@ -36,10 +36,10 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "anthropic/claude-sonnet-4-6")
 
 # Schedule (24-hour format, Eastern Time)
 SCHEDULE = {
-    "healthcheck": "06:00",
-    "oura_pull": "07:00",
-    "whoop_pull": "07:05",
-    "garmin_pull": "07:10",
-    "daily_briefing": "07:30",
-    "weekly_briefing": "09:00",  # Sundays only
+    "healthcheck": "09:00",
+    "oura_pull": "09:30",
+    "whoop_pull": "09:35",
+    "garmin_pull": "09:40",
+    "daily_briefing": "10:00",
+    "weekly_briefing": "10:30",  # Sundays only
 }

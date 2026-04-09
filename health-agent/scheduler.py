@@ -121,30 +121,30 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
 
     s = Scheduler()
 
-    # 06:00 — Healthcheck
-    s.add_job("Healthcheck", 6, 0, lambda: run_healthcheck(db_path))
+    # 09:00 — Healthcheck
+    s.add_job("Healthcheck", 9, 0, lambda: run_healthcheck(db_path))
 
-    # 07:00 — Oura pull
-    s.add_job("Oura Pull", 7, 0, lambda: oura_pull(db_path=db_path))
+    # 09:30 — Oura pull
+    s.add_job("Oura Pull", 9, 30, lambda: oura_pull(db_path=db_path))
 
-    # 07:05 — Whoop pull
-    s.add_job("Whoop Pull", 7, 5, lambda: whoop_pull(db_path=db_path))
+    # 09:35 — Whoop pull
+    s.add_job("Whoop Pull", 9, 35, lambda: whoop_pull(db_path=db_path))
 
-    # 07:10 — Garmin pull
-    s.add_job("Garmin Pull", 7, 10, lambda: garmin_pull(db_path=db_path))
+    # 09:40 — Garmin pull
+    s.add_job("Garmin Pull", 9, 40, lambda: garmin_pull(db_path=db_path))
 
-    # 07:30 — Daily briefing
+    # 10:00 — Daily briefing
     def daily():
         result = generate_briefing(weekly=False, db_path=db_path)
         send_message(result["full_message"])
 
-    s.add_job("Daily Briefing", 7, 30, daily)
+    s.add_job("Daily Briefing", 10, 0, daily)
 
-    # 09:00 Sunday — Weekly deep-dive
+    # 10:30 Sunday — Weekly deep-dive
     def weekly():
         result = generate_briefing(weekly=True, db_path=db_path)
         send_message(result["full_message"])
 
-    s.add_job("Weekly Briefing", 9, 0, weekly, day_of_week=6)  # 6 = Sunday
+    s.add_job("Weekly Briefing", 10, 30, weekly, day_of_week=6)  # 6 = Sunday
 
     return s
