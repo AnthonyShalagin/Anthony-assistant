@@ -46,7 +46,7 @@ async function connect() {
     client = new BlueLinky({
       username: process.env.GENESIS_USERNAME,
       password: process.env.GENESIS_PASSWORD,
-      brand: "genesis",
+      brand: "hyundai",
       region: "US",
       pin: process.env.GENESIS_PIN,
     });
