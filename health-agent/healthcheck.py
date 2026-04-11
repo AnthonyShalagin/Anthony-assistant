@@ -83,10 +83,6 @@ def run_healthcheck(db_path: Optional[str] = None, notify: bool = True) -> dict:
     ok, msg = check_whoop_token(db_path)
     results["whoop"] = {"ok": ok, "message": msg}
 
-    # Garmin
-    ok, msg = check_garmin_token(db_path)
-    results["garmin"] = {"ok": ok, "message": msg}
-
     # Format report
     all_ok = all(r["ok"] for r in results.values())
     status = "✅" if all_ok else "⚠️"

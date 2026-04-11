@@ -68,10 +68,6 @@ TRACKED_METRICS = [
     ("strain_score", "whoop", "", 1, "Strain"),
     ("hrv_rmssd", "whoop", "ms", 0, "HRV (Whoop)"),
     ("sleep_performance", "whoop", "%", 0, "Sleep Perf"),
-    # Garmin
-    ("steps", "garmin", "", 0, "Steps"),
-    ("body_battery_high", "garmin", "", 0, "Body Battery"),
-    ("avg_stress", "garmin", "", 0, "Stress"),
 ]
 
 

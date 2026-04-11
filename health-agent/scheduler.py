@@ -115,7 +115,6 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
     from healthcheck import run_healthcheck
     from clients.oura import pull_daily as oura_pull
     from clients.whoop import pull_daily as whoop_pull
-    from clients.garmin import pull_daily as garmin_pull
     from briefing.generator import generate_briefing
     from telegram_bot import send_message
 
@@ -129,9 +128,6 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
 
     # 09:35 — Whoop pull
     s.add_job("Whoop Pull", 9, 35, lambda: whoop_pull(db_path=db_path))
-
-    # 09:40 — Garmin pull
-    s.add_job("Garmin Pull", 9, 40, lambda: garmin_pull(db_path=db_path))
 
     # 10:00 — Daily briefing
     def daily():
