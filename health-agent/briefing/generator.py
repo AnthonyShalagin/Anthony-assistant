@@ -6,92 +6,145 @@ a formatted briefing for Telegram delivery.
 
 import json
 import logging
-from datetime import date, datetime
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import requests
 
 from briefing.trends import get_all_trends, format_trends_block, MetricTrend
 from config import LLM_MODEL, OPENROUTER_API_KEY
-from database import get_db, get_recent_workouts
+from database import get_db, get_recent_workouts, get_metrics, get_metric_average
 
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-DAILY_SYSTEM_PROMPT = """You are a concise personal health analyst. Given the user's health data from wearables, provide a very brief daily insight.
+DAILY_SYSTEM_PROMPT = """You are a world-class functional medicine practitioner and health coach. You have access to this person's wearable data and workout history. They can already see their scores in their apps — never restate them.
+
+Your job is to catch what they'd MISS:
+- HRV-to-training-load mismatches (nervous system not recovering despite "good" sleep scores)
+- Patterns across days (e.g. HRV consistently drops after back-to-back training days)
+- Signs of accumulated fatigue vs acute fatigue
+- Muscle group imbalances or neglected movement patterns
+- Strength plateaus or regressions that signal programming issues
+- Recovery quality vs recovery quantity (high sleep score but low HRV = poor parasympathetic recovery)
+- Overreaching signals before they become overtraining
 
 Rules:
-- 2-3 sentences MAX
-- One key takeaway and one actionable tip
-- Do NOT repeat raw numbers
-- Skip missing data sources — don't mention them
-- Direct, no fluff"""
+- 1-3 sentences ONLY. Respect their time.
+- NEVER restate numbers or scores — they have apps for that
+- Only message if there's something genuinely worth flagging
+- If nothing stands out, say "Nothing flagged today." and stop
+- Skip pleasantries. Direct. Clinical. Useful.
+- Think like a practitioner reviewing labs, not a cheerleader"""
 
-WEEKLY_SYSTEM_PROMPT = """You are a personal health analyst providing a weekly deep-dive review. Given 7 days of health data from multiple wearables and workout logs, provide a comprehensive weekly briefing.
+WEEKLY_SYSTEM_PROMPT = """You are a world-class functional medicine practitioner doing a weekly review. The user sees their daily scores already — never restate them.
+
+Find the patterns that only emerge across a full week:
+- Nervous system recovery trajectory (is HRV trending up, flat, or declining over the week?)
+- Training load vs recovery capacity mismatch
+- Sleep debt accumulation (subtle declines across multiple nights)
+- Muscle group balance and movement pattern gaps
+- Volume progression or regression vs prior weeks
+- Whether their training frequency matches their recovery capacity
 
 Rules:
-- Summarize the week's key trends across all sources
-- Compare this week vs the 30-day baseline
-- Flag any patterns (overtraining, insufficient recovery, sleep debt)
-- Identify what went well and what needs attention
-- Give 2-3 specific, actionable recommendations for next week
-- Keep it under 400 words
-- Do NOT repeat raw numbers
-- If data from a source is missing, acknowledge it but don't speculate
-- Use a supportive, coaching tone"""
+- 4-6 sentences MAX. Lead with the most important finding.
+- 1-2 specific changes for next week
+- NEVER restate raw numbers — only patterns and implications
+- If it was a solid week, say so in one sentence and move on
+- Clinical, direct. No cheerleading."""
 
 
 def _build_context(trends: list[MetricTrend], weekly: bool = False, db_path: Optional[str] = None) -> str:
-    """Build the structured data context for the LLM prompt."""
+    """Build rich structured data context for the LLM prompt."""
     parts = []
-
-    # Date info
     today = date.today()
-    parts.append(f"Date: {today.strftime('%A, %B %d, %Y')}")
-    if weekly:
-        parts.append("Report type: Weekly deep-dive (last 7 days vs 30-day baseline)")
-    else:
-        parts.append("Report type: Daily briefing")
-
-    parts.append("")
-
-    # Trends block
-    trends_text = format_trends_block(trends)
-    parts.append("=== HEALTH METRICS ===")
-    parts.append(trends_text)
-    parts.append("")
-
-    # Missing sources
-    missing = [t.source for t in trends if not t.available]
-    if missing:
-        unique_missing = sorted(set(missing))
-        parts.append(f"Missing data sources: {', '.join(unique_missing)}")
-        parts.append("")
-
-    # Recent workouts
     db_kwargs = {"db_path": db_path} if db_path else {}
+
+    parts.append(f"Date: {today.strftime('%A, %B %d, %Y')}")
+    parts.append("")
+
+    # Current metrics with 7d and 30d context
+    parts.append("=== HEALTH METRICS (7-day avg → 30-day avg) ===")
+    for t in trends:
+        if t.available:
+            val_30d = f"{t.avg_30d:.0f}" if t.avg_30d else "n/a"
+            parts.append(f"  {t.metric_name} ({t.source}): 7d={t.avg_7d:.1f}, 30d={val_30d} {t.arrow}")
+    parts.append("")
+
+    # Workout analysis — much richer context
     with get_db(**db_kwargs) as conn:
-        days = 7 if weekly else 3
-        workouts = get_recent_workouts(conn, days=days)
+        lookback = 30 if weekly else 14
+        workouts = get_recent_workouts(conn, days=lookback)
 
     if workouts:
-        parts.append("=== RECENT WORKOUTS ===")
+        parts.append("=== WORKOUT ANALYSIS ===")
+
         # Group by date and workout
-        by_workout = {}
+        by_workout = defaultdict(list)
         for w in workouts:
-            key = (w["date"], w["workout_name"])
-            by_workout.setdefault(key, []).append(w)
+            by_workout[(w["date"], w["workout_name"])].append(w)
+
+        # Training frequency
+        workout_dates = sorted(set(w["date"] for w in workouts))
+        parts.append(f"Training frequency: {len(workout_dates)} sessions in last {lookback} days")
+
+        # Days since last workout
+        if workout_dates:
+            last_workout = date.fromisoformat(workout_dates[-1])
+            days_rest = (today - last_workout).days
+            parts.append(f"Days since last workout: {days_rest}")
+
+        # Muscle group / exercise frequency
+        exercise_counts = defaultdict(int)
+        exercise_max_weight = defaultdict(float)
+        exercise_max_1rm = defaultdict(float)
+        weekly_volume = defaultdict(float)
 
         for (dt, name), sets in by_workout.items():
+            week_key = date.fromisoformat(dt).isocalendar()[1]
+            for s in sets:
+                ex = s["exercise"]
+                exercise_counts[ex] += 1
+                if s["weight"] and s["weight"] > exercise_max_weight[ex]:
+                    exercise_max_weight[ex] = s["weight"]
+                if s["estimated_1rm"] and s["estimated_1rm"] > exercise_max_1rm[ex]:
+                    exercise_max_1rm[ex] = s["estimated_1rm"]
+                if s["volume"]:
+                    weekly_volume[week_key] += s["volume"]
+
+        # Top exercises by frequency
+        top_exercises = sorted(exercise_counts.items(), key=lambda x: -x[1])[:10]
+        parts.append(f"Top exercises (last {lookback}d): " +
+                    ", ".join(f"{ex}({c} sets)" for ex, c in top_exercises))
+
+        # Volume trend by week
+        if len(weekly_volume) > 1:
+            sorted_weeks = sorted(weekly_volume.items())
+            parts.append("Weekly total volume trend: " +
+                        " → ".join(f"wk{w}:{v:.0f}" for w, v in sorted_weeks[-4:]))
+
+        # Best estimated 1RMs for key lifts
+        key_lifts = ["Bench Press (Barbell)", "Squat (Barbell)", "Deadlift (Barbell)",
+                     "Bench Press (Dumbbell)", "Incline Bench Press (Barbell)",
+                     "Squat (Smith Machine)", "Leg Press"]
+        prs = {ex: exercise_max_1rm[ex] for ex in key_lifts if exercise_max_1rm.get(ex)}
+        if prs:
+            parts.append("Best est. 1RMs (last {0}d): ".format(lookback) +
+                        ", ".join(f"{ex}: {v:.0f}lb" for ex, v in prs.items()))
+
+        # Recent sessions detail (last 3)
+        recent_sessions = sorted(by_workout.items(), key=lambda x: x[0])[-3:]
+        parts.append("")
+        parts.append("=== LAST 3 SESSIONS ===")
+        for (dt, name), sets in recent_sessions:
             exercises = set(s["exercise"] for s in sets)
             total_vol = sum(s["volume"] for s in sets if s["volume"])
-            best_1rm = max((s["estimated_1rm"] for s in sets if s["estimated_1rm"]), default=0)
-            parts.append(f"  {dt} — {name}: {len(exercises)} exercises, "
-                        f"{len(sets)} sets, {total_vol:.0f} total volume, "
-                        f"best est. 1RM: {best_1rm:.0f}")
+            parts.append(f"  {dt} — {name}: {', '.join(sorted(exercises))} | vol: {total_vol:.0f}")
     else:
-        parts.append("No recent workouts logged.")
+        parts.append("No workouts in the last {0} days.".format(lookback))
 
     return "\n".join(parts)
 
@@ -111,11 +164,14 @@ def generate_briefing(weekly: bool = False, db_path: Optional[str] = None) -> di
     # Call LLM
     analysis = _call_llm(system_prompt, context)
 
-    # Build full Telegram message
-    header = "📋 Weekly Health Report" if weekly else "🌅 Daily Health Briefing"
+    # Build full Telegram message — just the insight, no noise
+    header = "📋 Weekly Review" if weekly else "💡"
     today = date.today().strftime("%A, %B %d")
 
-    full_message = f"{header} — {today}\n\n{trends_block}\n\n{analysis}"
+    if weekly:
+        full_message = f"{header} — {today}\n\n{analysis}"
+    else:
+        full_message = f"{header} {analysis}"
 
     return {
         "trends_block": trends_block,
@@ -142,8 +198,8 @@ def _call_llm(system_prompt: str, user_content: str) -> str:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
-                "max_tokens": 600,
-                "temperature": 0.3,
+                "max_tokens": 400,
+                "temperature": 0.4,
             },
             timeout=60,
         )

@@ -143,4 +143,12 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
 
     s.add_job("Weekly Briefing", 10, 30, weekly, day_of_week=6)  # 6 = Sunday
 
+    # 1st of each month at 10:00 — Remind to upload Strong data
+    def strong_reminder():
+        from datetime import date
+        if date.today().day == 1:
+            send_message("📲 Monthly reminder: Export your latest workouts from Strong and send the CSV here to keep your training data current.")
+
+    s.add_job("Strong Reminder", 10, 0, strong_reminder)
+
     return s
