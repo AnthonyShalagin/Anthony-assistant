@@ -149,6 +149,47 @@ def _build_context(trends: list[MetricTrend], weekly: bool = False, db_path: Opt
     return "\n".join(parts)
 
 
+def _get_todays_key_metrics(db_path: Optional[str] = None) -> str:
+    """Get today's most important metrics as a compact one-liner."""
+    db_kwargs = {"db_path": db_path} if db_path else {}
+    today_str = date.today().isoformat()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+
+    parts = []
+    with get_db(**db_kwargs) as conn:
+        # Check today first, then yesterday
+        for dt in [today_str, yesterday_str]:
+            metrics = conn.execute(
+                "SELECT metric_name, value, source FROM health_metrics WHERE date = ? AND value IS NOT NULL",
+                (dt,)
+            ).fetchall()
+            if metrics:
+                metric_map = {(r["source"], r["metric_name"]): r["value"] for r in metrics}
+
+                # Key metrics in priority order
+                recovery = metric_map.get(("whoop", "recovery_score"))
+                sleep = metric_map.get(("oura", "sleep_score"))
+                hrv_whoop = metric_map.get(("whoop", "hrv_rmssd"))
+                hrv_oura = metric_map.get(("oura", "hrv_average"))
+                strain = metric_map.get(("whoop", "strain_score"))
+                readiness = metric_map.get(("oura", "readiness_score"))
+
+                if recovery is not None:
+                    parts.append(f"Recovery: {recovery:.0f}%")
+                if sleep is not None:
+                    parts.append(f"Sleep: {sleep:.0f}")
+                if readiness is not None:
+                    parts.append(f"Readiness: {readiness:.0f}")
+                hrv = hrv_whoop or hrv_oura
+                if hrv is not None:
+                    parts.append(f"HRV: {hrv:.0f}ms")
+                if strain is not None:
+                    parts.append(f"Strain: {strain:.1f}")
+                break  # Found data, stop looking
+
+    return " | ".join(parts) if parts else ""
+
+
 def generate_briefing(weekly: bool = False, db_path: Optional[str] = None) -> dict:
     """Generate an LLM health briefing.
 
@@ -164,14 +205,17 @@ def generate_briefing(weekly: bool = False, db_path: Optional[str] = None) -> di
     # Call LLM
     analysis = _call_llm(system_prompt, context)
 
-    # Build full Telegram message — just the insight, no noise
-    header = "📋 Weekly Review" if weekly else "💡"
+    # Build full Telegram message
     today = date.today().strftime("%A, %B %d")
 
     if weekly:
-        full_message = f"{header} — {today}\n\n{analysis}"
+        full_message = f"📋 Weekly Review — {today}\n\n{analysis}"
     else:
-        full_message = f"{header} {analysis}"
+        key_metrics = _get_todays_key_metrics(db_path)
+        if key_metrics:
+            full_message = f"{key_metrics}\n\n{analysis}"
+        else:
+            full_message = f"💡 {analysis}"
 
     return {
         "trends_block": trends_block,

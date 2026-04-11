@@ -78,19 +78,28 @@ def _get(endpoint: str, params: dict = None, db_path: Optional[str] = None) -> d
     if not session:
         raise RuntimeError("Whoop OAuth session not available — run initial auth first")
     resp = session.get(f"{BASE_URL}/{endpoint}", params=params or {}, timeout=30)
+    if resp.status_code == 404:
+        # Some endpoints return 404 when no data exists for the date range
+        return {}
     resp.raise_for_status()
     return resp.json()
 
 
 def fetch_recovery(dt: Optional[str] = None, db_path: Optional[str] = None) -> list[dict]:
-    """Fetch recovery data for a date range."""
+    """Fetch recovery data. Tries date-filtered first, then latest."""
     target = dt or date.today().isoformat()
     next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
+    # Try with date range
     data = _get(
         "recovery",
         {"start": f"{target}T00:00:00.000Z", "end": f"{next_day}T00:00:00.000Z"},
         db_path,
     )
+    records = data.get("records", [])
+    if records:
+        return records
+    # Fallback: get latest without date filter
+    data = _get("recovery", {"limit": 1}, db_path)
     return data.get("records", [])
 
 
@@ -107,7 +116,7 @@ def fetch_strain(dt: Optional[str] = None, db_path: Optional[str] = None) -> lis
 
 
 def fetch_sleep(dt: Optional[str] = None, db_path: Optional[str] = None) -> list[dict]:
-    """Fetch sleep data for a date range."""
+    """Fetch sleep data. Tries date-filtered first, then latest."""
     target = dt or date.today().isoformat()
     next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
     data = _get(
@@ -115,6 +124,11 @@ def fetch_sleep(dt: Optional[str] = None, db_path: Optional[str] = None) -> list
         {"start": f"{target}T00:00:00.000Z", "end": f"{next_day}T00:00:00.000Z"},
         db_path,
     )
+    records = data.get("records", [])
+    if records:
+        return records
+    # Fallback: get latest without date filter
+    data = _get("activity/sleep", {"limit": 1}, db_path)
     return data.get("records", [])
 
 
