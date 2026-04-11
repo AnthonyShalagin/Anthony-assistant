@@ -120,8 +120,8 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
 
     s = Scheduler()
 
-    # 09:00 — Healthcheck
-    s.add_job("Healthcheck", 9, 0, lambda: run_healthcheck(db_path))
+    # 09:00 — Healthcheck (silent — logs only, no Telegram)
+    s.add_job("Healthcheck", 9, 0, lambda: run_healthcheck(db_path, notify=False))
 
     # 09:30 — Oura pull
     s.add_job("Oura Pull", 9, 30, lambda: oura_pull(db_path=db_path))

@@ -19,16 +19,14 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-DAILY_SYSTEM_PROMPT = """You are a concise personal health analyst. Given the user's health data from multiple wearables, provide a brief daily health briefing.
+DAILY_SYSTEM_PROMPT = """You are a concise personal health analyst. Given the user's health data from wearables, provide a very brief daily insight.
 
 Rules:
-- Identify the top trend (positive or negative)
-- Flag any concerns (declining HRV, signs of overtraining, poor sleep trends)
-- Give ONE specific, actionable recommendation
-- Keep it under 200 words
-- Do NOT repeat raw numbers — the user already sees those above your analysis
-- If data from a source is missing, acknowledge it briefly but don't speculate
-- Use a supportive, direct tone"""
+- 2-3 sentences MAX
+- One key takeaway and one actionable tip
+- Do NOT repeat raw numbers
+- Skip missing data sources — don't mention them
+- Direct, no fluff"""
 
 WEEKLY_SYSTEM_PROMPT = """You are a personal health analyst providing a weekly deep-dive review. Given 7 days of health data from multiple wearables and workout logs, provide a comprehensive weekly briefing.
 
@@ -117,7 +115,7 @@ def generate_briefing(weekly: bool = False, db_path: Optional[str] = None) -> di
     header = "📋 Weekly Health Report" if weekly else "🌅 Daily Health Briefing"
     today = date.today().strftime("%A, %B %d")
 
-    full_message = f"{header}\n{today}\n{'━' * 24}\n\n{trends_block}\n\n{'━' * 24}\n💡 Analysis:\n{analysis}"
+    full_message = f"{header} — {today}\n\n{trends_block}\n\n{analysis}"
 
     return {
         "trends_block": trends_block,

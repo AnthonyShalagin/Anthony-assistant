@@ -117,7 +117,6 @@ def format_trends_block(trends: list[MetricTrend]) -> str:
                 lines.append(f"  {m}")
             lines.append("")
 
-    if missing_sources:
-        lines.append(f"⚠️ No data from: {', '.join(sorted(missing_sources))}")
+    # Silently skip missing sources — no need to clutter the message
 
     return "\n".join(lines).strip()
