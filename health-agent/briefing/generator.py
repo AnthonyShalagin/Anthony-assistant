@@ -206,6 +206,8 @@ def _get_todays_key_metrics(db_path: Optional[str] = None) -> str:
         strain = metric_map.get(("whoop", "strain_score"))
         hrv_whoop = metric_map.get(("whoop", "hrv_rmssd"))
         rhr = metric_map.get(("whoop", "resting_heart_rate"))
+        max_hr = metric_map.get(("whoop", "max_heart_rate"))
+        cals = metric_map.get(("whoop", "kilojoules"))
         if recovery is not None:
             whoop_parts.append(f"Recovery: {recovery:.0f}%")
         if strain is not None:
@@ -214,6 +216,10 @@ def _get_todays_key_metrics(db_path: Optional[str] = None) -> str:
             whoop_parts.append(f"HRV: {hrv_whoop:.0f}ms")
         if rhr is not None:
             whoop_parts.append(f"RHR: {rhr:.0f}bpm")
+        if max_hr is not None:
+            whoop_parts.append(f"Max HR: {max_hr:.0f}")
+        if cals is not None:
+            whoop_parts.append(f"Cal: {cals / 4.184:.0f}kcal")
         if whoop_parts:
             lines.append(f"Whoop: {' | '.join(whoop_parts)}")
 

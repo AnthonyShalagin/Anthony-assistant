@@ -203,6 +203,10 @@ def pull_daily(dt: Optional[str] = None, db_path: Optional[str] = None) -> dict:
                 if avg_hr is not None:
                     upsert_metric(conn, target, "whoop", "avg_heart_rate", avg_hr, "bpm")
                     summary["avg_heart_rate"] = avg_hr
+                max_hr = score.get("max_heart_rate")
+                if max_hr is not None:
+                    upsert_metric(conn, target, "whoop", "max_heart_rate", max_hr, "bpm")
+                    summary["max_heart_rate"] = max_hr
         except Exception as e:
             logger.error("Whoop strain fetch failed: %s", e)
             summary["strain_error"] = str(e)
