@@ -1,5 +1,5 @@
 const http = require("http");
-const BlueLinky = require("bluelinky");
+const BlueLinky = require("bluelinky").default || require("bluelinky");
 
 // Load .env manually (no extra dependencies)
 const fs = require("fs");
