@@ -150,12 +150,11 @@ def _build_context(trends: list[MetricTrend], weekly: bool = False, db_path: Opt
 
 
 def _get_todays_key_metrics(db_path: Optional[str] = None) -> str:
-    """Get today's most important metrics as a compact one-liner."""
+    """Get today's most important metrics, grouped by source."""
     db_kwargs = {"db_path": db_path} if db_path else {}
     today_str = date.today().isoformat()
     yesterday_str = (date.today() - timedelta(days=1)).isoformat()
 
-    parts = []
     with get_db(**db_kwargs) as conn:
         # Check today first, then yesterday
         for dt in [today_str, yesterday_str]:
@@ -166,28 +165,45 @@ def _get_todays_key_metrics(db_path: Optional[str] = None) -> str:
             if metrics:
                 metric_map = {(r["source"], r["metric_name"]): r["value"] for r in metrics}
 
-                # Key metrics in priority order
-                recovery = metric_map.get(("whoop", "recovery_score"))
+                lines = []
+
+                # Oura line
+                oura_parts = []
                 sleep = metric_map.get(("oura", "sleep_score"))
-                hrv_whoop = metric_map.get(("whoop", "hrv_rmssd"))
-                hrv_oura = metric_map.get(("oura", "hrv_average"))
-                strain = metric_map.get(("whoop", "strain_score"))
                 readiness = metric_map.get(("oura", "readiness_score"))
-
-                if recovery is not None:
-                    parts.append(f"Recovery: {recovery:.0f}%")
+                activity = metric_map.get(("oura", "activity_score"))
+                hrv_oura = metric_map.get(("oura", "hrv_average"))
                 if sleep is not None:
-                    parts.append(f"Sleep: {sleep:.0f}")
+                    oura_parts.append(f"Sleep: {sleep:.0f}")
                 if readiness is not None:
-                    parts.append(f"Readiness: {readiness:.0f}")
-                hrv = hrv_whoop or hrv_oura
-                if hrv is not None:
-                    parts.append(f"HRV: {hrv:.0f}ms")
-                if strain is not None:
-                    parts.append(f"Strain: {strain:.1f}")
-                break  # Found data, stop looking
+                    oura_parts.append(f"Readiness: {readiness:.0f}")
+                if activity is not None:
+                    oura_parts.append(f"Activity: {activity:.0f}")
+                if hrv_oura is not None:
+                    oura_parts.append(f"HRV: {hrv_oura:.0f}ms")
+                if oura_parts:
+                    lines.append(f"Oura: {' | '.join(oura_parts)}")
 
-    return " | ".join(parts) if parts else ""
+                # Whoop line
+                whoop_parts = []
+                recovery = metric_map.get(("whoop", "recovery_score"))
+                strain = metric_map.get(("whoop", "strain_score"))
+                hrv_whoop = metric_map.get(("whoop", "hrv_rmssd"))
+                rhr = metric_map.get(("whoop", "resting_heart_rate"))
+                if recovery is not None:
+                    whoop_parts.append(f"Recovery: {recovery:.0f}%")
+                if strain is not None:
+                    whoop_parts.append(f"Strain: {strain:.1f}")
+                if hrv_whoop is not None:
+                    whoop_parts.append(f"HRV: {hrv_whoop:.0f}ms")
+                if rhr is not None:
+                    whoop_parts.append(f"RHR: {rhr:.0f}bpm")
+                if whoop_parts:
+                    lines.append(f"Whoop: {' | '.join(whoop_parts)}")
+
+                return "\n".join(lines) if lines else ""
+
+    return ""
 
 
 def generate_briefing(weekly: bool = False, db_path: Optional[str] = None) -> dict:
