@@ -103,7 +103,7 @@ def parse_csv(content: str, db_path: Optional[str] = None) -> dict:
                 is_warmup = raw_set_order.upper() == "W"
                 set_order = _parse_set_order(raw_set_order)
                 weight = float(row.get("Weight", 0) or 0)
-                reps = int(row.get("Reps", 0) or 0)
+                reps = int(float(row.get("Reps", 0) or 0))
 
                 if not exercise:
                     continue
