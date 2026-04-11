@@ -1,0 +1,12 @@
+{
+  "name": "genesis-service",
+  "version": "1.0.0",
+  "description": "Local Genesis bluelinky service",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bluelinky": "^9.0.0"
+  }
+}
