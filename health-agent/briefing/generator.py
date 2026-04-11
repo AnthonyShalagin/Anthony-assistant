@@ -36,8 +36,9 @@ Rules:
 - NEVER restate numbers or scores — they have apps for that
 - Only message if there's something genuinely worth flagging
 - If nothing stands out, say "Nothing flagged today." and stop
-- Skip pleasantries. Direct. Clinical. Useful.
-- Think like a practitioner reviewing labs, not a cheerleader"""
+- Skip pleasantries. Direct. Useful.
+- Be measured — flag concerns proportionally, don't catastrophize
+- Think like a practitioner reviewing labs, not an alarmist"""
 
 WEEKLY_SYSTEM_PROMPT = """You are a world-class functional medicine practitioner doing a weekly review. The user sees their daily scores already — never restate them.
 
@@ -150,60 +151,73 @@ def _build_context(trends: list[MetricTrend], weekly: bool = False, db_path: Opt
 
 
 def _get_todays_key_metrics(db_path: Optional[str] = None) -> str:
-    """Get today's most important metrics, grouped by source."""
+    """Get today's most important metrics, grouped by source.
+
+    Checks both today and yesterday since Oura dates sleep to the
+    night it started (yesterday), while readiness/activity are today.
+    """
     db_kwargs = {"db_path": db_path} if db_path else {}
     today_str = date.today().isoformat()
     yesterday_str = (date.today() - timedelta(days=1)).isoformat()
 
     with get_db(**db_kwargs) as conn:
-        # Check today first, then yesterday
-        for dt in [today_str, yesterday_str]:
-            metrics = conn.execute(
-                "SELECT metric_name, value, source FROM health_metrics WHERE date = ? AND value IS NOT NULL",
-                (dt,)
-            ).fetchall()
-            if metrics:
-                metric_map = {(r["source"], r["metric_name"]): r["value"] for r in metrics}
+        # Get last 2 days of metrics to build complete picture
+        metrics = conn.execute(
+            "SELECT metric_name, value, source, date FROM health_metrics "
+            "WHERE date >= ? AND value IS NOT NULL ORDER BY date DESC",
+            (yesterday_str,)
+        ).fetchall()
 
-                lines = []
+        if not metrics:
+            return ""
 
-                # Oura line
-                oura_parts = []
-                sleep = metric_map.get(("oura", "sleep_score"))
-                readiness = metric_map.get(("oura", "readiness_score"))
-                activity = metric_map.get(("oura", "activity_score"))
-                hrv_oura = metric_map.get(("oura", "hrv_average"))
-                if sleep is not None:
-                    oura_parts.append(f"Sleep: {sleep:.0f}")
-                if readiness is not None:
-                    oura_parts.append(f"Readiness: {readiness:.0f}")
-                if activity is not None:
-                    oura_parts.append(f"Activity: {activity:.0f}")
-                if hrv_oura is not None:
-                    oura_parts.append(f"HRV: {hrv_oura:.0f}ms")
-                if oura_parts:
-                    lines.append(f"Oura: {' | '.join(oura_parts)}")
+        # Build map preferring today's data, falling back to yesterday
+        metric_map = {}
+        for r in metrics:
+            key = (r["source"], r["metric_name"])
+            if key not in metric_map:  # First seen = most recent
+                metric_map[key] = r["value"]
 
-                # Whoop line
-                whoop_parts = []
-                recovery = metric_map.get(("whoop", "recovery_score"))
-                strain = metric_map.get(("whoop", "strain_score"))
-                hrv_whoop = metric_map.get(("whoop", "hrv_rmssd"))
-                rhr = metric_map.get(("whoop", "resting_heart_rate"))
-                if recovery is not None:
-                    whoop_parts.append(f"Recovery: {recovery:.0f}%")
-                if strain is not None:
-                    whoop_parts.append(f"Strain: {strain:.1f}")
-                if hrv_whoop is not None:
-                    whoop_parts.append(f"HRV: {hrv_whoop:.0f}ms")
-                if rhr is not None:
-                    whoop_parts.append(f"RHR: {rhr:.0f}bpm")
-                if whoop_parts:
-                    lines.append(f"Whoop: {' | '.join(whoop_parts)}")
+        lines = []
 
-                return "\n".join(lines) if lines else ""
+        # Oura line
+        oura_parts = []
+        sleep = metric_map.get(("oura", "sleep_score"))
+        readiness = metric_map.get(("oura", "readiness_score"))
+        activity = metric_map.get(("oura", "activity_score"))
+        hrv_oura = metric_map.get(("oura", "hrv_average"))
+        rhr_oura = metric_map.get(("oura", "readiness_resting_heart_rate"))
+        if sleep is not None:
+            oura_parts.append(f"Sleep: {sleep:.0f}")
+        if readiness is not None:
+            oura_parts.append(f"Readiness: {readiness:.0f}")
+        if activity is not None:
+            oura_parts.append(f"Activity: {activity:.0f}")
+        if hrv_oura is not None:
+            oura_parts.append(f"HRV: {hrv_oura:.0f}ms")
+        if rhr_oura is not None:
+            oura_parts.append(f"RHR: {rhr_oura:.0f}")
+        if oura_parts:
+            lines.append(f"Oura: {' | '.join(oura_parts)}")
 
-    return ""
+        # Whoop line
+        whoop_parts = []
+        recovery = metric_map.get(("whoop", "recovery_score"))
+        strain = metric_map.get(("whoop", "strain_score"))
+        hrv_whoop = metric_map.get(("whoop", "hrv_rmssd"))
+        rhr = metric_map.get(("whoop", "resting_heart_rate"))
+        if recovery is not None:
+            whoop_parts.append(f"Recovery: {recovery:.0f}%")
+        if strain is not None:
+            whoop_parts.append(f"Strain: {strain:.1f}")
+        if hrv_whoop is not None:
+            whoop_parts.append(f"HRV: {hrv_whoop:.0f}ms")
+        if rhr is not None:
+            whoop_parts.append(f"RHR: {rhr:.0f}bpm")
+        if whoop_parts:
+            lines.append(f"Whoop: {' | '.join(whoop_parts)}")
+
+        return "\n".join(lines) if lines else ""
 
 
 def generate_briefing(weekly: bool = False, db_path: Optional[str] = None) -> dict:
