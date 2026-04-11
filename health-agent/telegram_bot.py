@@ -128,9 +128,10 @@ def handle_document(update: dict, db_path: Optional[str] = None, token: Optional
 
     try:
         summary = parse_csv(content, db_path)
+        working_sets = summary['sets'] - summary.get('warmup_sets', 0)
         msg = (
             f"💪 Workout imported!\n"
-            f"• {summary['sets']} sets across {summary['exercises']} exercises\n"
+            f"• {working_sets} working sets + {summary.get('warmup_sets', 0)} warmup across {summary['exercises']} exercises\n"
             f"• {summary['workouts']} workout session(s)\n"
         )
         if summary.get("exercise_list"):
