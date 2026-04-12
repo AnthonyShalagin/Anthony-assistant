@@ -25,7 +25,10 @@ from smart_home import (
     get_lock_status, set_lock,
     get_sensor_status, run_async,
 )
-from schedules import init_db, add_schedule, delete_schedule, list_schedules, get_due_schedules
+from schedules import (
+    init_db, add_schedule, add_lock_schedule, delete_schedule,
+    list_schedules, get_due_schedules,
+)
 
 # Load .env
 BASE_DIR = Path(__file__).resolve().parent
@@ -86,6 +89,9 @@ def _tool_sensors() -> dict:
 
 def _tool_schedule_add(name: str, temperature: int, mode: str, time: str, days: str = "daily") -> dict:
     return {"success": True, "message": add_schedule(name, temperature, mode, time, days)}
+
+def _tool_lock_schedule_add(name: str, locked: bool, time: str, days: str = "daily") -> dict:
+    return {"success": True, "message": add_lock_schedule(name, locked, time, days)}
 
 def _tool_schedule_list() -> dict:
     return {"success": True, "message": list_schedules()}
@@ -167,8 +173,25 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "lock_schedule_add",
+            "description": "Create a recurring schedule to lock or unlock the front door at a specific time. Use this for requests like 'lock the door every night at 9pm'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Short name (e.g. 'Nightly Lock')."},
+                    "locked": {"type": "boolean", "description": "True to lock, False to unlock."},
+                    "time": {"type": "string", "description": "Time like '9:00 PM'."},
+                    "days": {"type": "string", "description": "'daily', 'weekdays', 'weekends', or comma-separated days. Defaults to 'daily'."},
+                },
+                "required": ["name", "locked", "time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "schedule_list",
-            "description": "List all thermostat schedules.",
+            "description": "List all schedules (thermostat AND lock).",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -193,6 +216,7 @@ TOOL_HANDLERS = {
     "lock_set": _tool_lock_set,
     "sensors": _tool_sensors,
     "schedule_add": _tool_schedule_add,
+    "lock_schedule_add": _tool_lock_schedule_add,
     "schedule_list": _tool_schedule_list,
     "schedule_delete": _tool_schedule_delete,
 }
@@ -334,11 +358,26 @@ def _schedule_loop():
             now_key = datetime.now(ET).strftime("%Y-%m-%d %H:%M")
             for sched in due:
                 key = f"{sched['name']}_{now_key}"
-                if key not in last_run:
-                    last_run[key] = True
-                    logger.info("Running schedule: %s", sched["name"])
-                    result = run_async(set_thermostat(sched["temperature"], sched["mode"]))
-                    send_message(f"⏰ Schedule \"{sched['name']}\": {result}")
+                if key in last_run:
+                    continue
+                last_run[key] = True
+                logger.info("Running schedule: %s", sched["name"])
+
+                action_type = sched.get("action_type", "thermostat")
+                params = sched.get("params_dict", {})
+
+                if action_type == "thermostat":
+                    temp = params.get("temperature") or sched.get("temperature")
+                    mode = params.get("mode") or sched.get("mode") or "cool"
+                    result = run_async(set_thermostat(temp, mode))
+                    send_message(f"⏰ {sched['name']}: {result}")
+                elif action_type == "lock":
+                    locked = params.get("locked", True)
+                    result = run_async(set_lock(locked))
+                    send_message(f"⏰ {sched['name']}: {result}")
+                else:
+                    logger.warning("Unknown action_type: %s", action_type)
+
             if len(last_run) > 100:
                 last_run.clear()
         except Exception as e:

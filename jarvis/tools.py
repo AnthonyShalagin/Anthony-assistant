@@ -193,22 +193,23 @@ def home_sensors() -> dict:
 
 
 def home_schedule_add(name: str, temperature: int, mode: str, time: str, days: str = "daily") -> dict:
-    """Create a recurring thermostat schedule.
-
-    Args:
-        name: Schedule name (e.g. "Nightly", "Weekday Morning").
-        temperature: Target temp in F.
-        mode: 'cool', 'heat', 'auto'.
-        time: Time like "10:00 PM" or "22:00".
-        days: "daily", "weekdays", "weekends", or comma-separated days
-              (e.g. "monday,tuesday").
-    """
+    """Create a recurring thermostat schedule."""
     try:
         from schedules import add_schedule
         msg = add_schedule(name, temperature, mode, time, days)
         return {"success": True, "message": msg}
     except Exception as e:
         return {"success": False, "message": f"Schedule add error: {e}"}
+
+
+def home_lock_schedule_add(name: str, locked: bool, time: str, days: str = "daily") -> dict:
+    """Create a recurring lock/unlock schedule."""
+    try:
+        from schedules import add_lock_schedule
+        msg = add_lock_schedule(name, locked, time, days)
+        return {"success": True, "message": msg}
+    except Exception as e:
+        return {"success": False, "message": f"Lock schedule error: {e}"}
 
 
 def home_schedule_list() -> dict:
@@ -367,8 +368,25 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "home_lock_schedule_add",
+            "description": "Create a recurring schedule to lock or unlock the front door. Use for 'lock the door every night at 9pm' etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "locked": {"type": "boolean", "description": "True to lock, False to unlock."},
+                    "time": {"type": "string"},
+                    "days": {"type": "string", "description": "'daily', 'weekdays', 'weekends', or comma-separated. Defaults to 'daily'."},
+                },
+                "required": ["name", "locked", "time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "home_schedule_list",
-            "description": "List all active thermostat schedules.",
+            "description": "List all active schedules (thermostat AND lock).",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -402,6 +420,7 @@ TOOL_HANDLERS = {
     "home_lock_set": home_lock_set,
     "home_sensors": home_sensors,
     "home_schedule_add": home_schedule_add,
+    "home_lock_schedule_add": home_lock_schedule_add,
     "home_schedule_list": home_schedule_list,
     "home_schedule_delete": home_schedule_delete,
 }
