@@ -10,7 +10,7 @@ import json
 import logging
 import sys
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -230,6 +230,45 @@ def home_schedule_delete(name: str) -> dict:
         return {"success": False, "message": f"Schedule delete error: {e}"}
 
 
+# ---------- MEMORY ----------
+# These tools receive an injected _user_id param from the bot.
+
+def remember_fact(content: str, category: str = "general", _user_id: str = "") -> dict:
+    """Save a fact about the user to persistent memory."""
+    try:
+        import memory
+        fact_id = memory.add_fact(_user_id, content, category)
+        return {"success": True, "message": f"Remembered (#{fact_id}): {content}"}
+    except Exception as e:
+        return {"success": False, "message": f"Memory save error: {e}"}
+
+
+def forget_fact(fact_id: Optional[int] = None, content_contains: Optional[str] = None,
+                _user_id: str = "") -> dict:
+    """Forget a fact by id or by a content substring match."""
+    try:
+        import memory
+        if fact_id is not None:
+            ok = memory.delete_fact(_user_id, fact_id)
+            return {"success": ok, "message": "Forgotten." if ok else "Fact not found."}
+        if content_contains:
+            n = memory.delete_fact_by_content(_user_id, content_contains)
+            return {"success": n > 0, "message": f"Forgot {n} matching fact(s)."}
+        return {"success": False, "message": "Provide fact_id or content_contains."}
+    except Exception as e:
+        return {"success": False, "message": f"Memory delete error: {e}"}
+
+
+def list_facts(_user_id: str = "") -> dict:
+    """List all facts remembered about the user."""
+    try:
+        import memory
+        facts = memory.list_facts(_user_id)
+        return {"success": True, "facts": facts}
+    except Exception as e:
+        return {"success": False, "message": f"Memory list error: {e}"}
+
+
 # ---------- TOOL REGISTRY ----------
 # OpenAI-format function schemas that the LLM can call
 
@@ -404,6 +443,43 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember_fact",
+            "description": "Save a fact/preference/routine about the user to persistent memory. Call this ANY time the user reveals something worth remembering for future conversations (e.g. preferences, routines, family names, home layout, dietary restrictions, work schedule).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The fact in a natural sentence (e.g. 'Prefers 68°F at night', 'Wife's name is Emma')."},
+                    "category": {"type": "string", "enum": ["preference", "routine", "context", "general"], "description": "Categorize the fact."},
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "forget_fact",
+            "description": "Remove a fact from memory. Use when the user says 'forget X' or corrects an outdated fact.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact_id": {"type": "integer", "description": "Specific fact id to remove."},
+                    "content_contains": {"type": "string", "description": "Alternative: substring to match against fact content."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_facts",
+            "description": "Show everything currently remembered about the user. Use when asked 'what do you know about me?'",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
@@ -423,6 +499,9 @@ TOOL_HANDLERS = {
     "home_lock_schedule_add": home_lock_schedule_add,
     "home_schedule_list": home_schedule_list,
     "home_schedule_delete": home_schedule_delete,
+    "remember_fact": remember_fact,
+    "forget_fact": forget_fact,
+    "list_facts": list_facts,
 }
 
 
