@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from config import DB_PATH
-
 logger = logging.getLogger(__name__)
+
+# Resolve DB path relative to this file — works whether imported from
+# home-bot directly or reused from Jarvis.
+DB_PATH = str(Path(__file__).resolve().parent / "data" / "schedules.db")
 
 ET = ZoneInfo("America/New_York")
 

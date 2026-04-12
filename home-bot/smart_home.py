@@ -2,13 +2,22 @@
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from smartrent import async_login
 
-from config import SMARTRENT_EMAIL, SMARTRENT_PASSWORD
-
 logger = logging.getLogger(__name__)
+
+# Load home-bot's .env explicitly so this module works whether
+# imported from home-bot or reused from Jarvis.
+_HOME_BOT_DIR = Path(__file__).resolve().parent
+load_dotenv(_HOME_BOT_DIR / ".env")
+
+SMARTRENT_EMAIL = os.environ.get("SMARTRENT_EMAIL", "")
+SMARTRENT_PASSWORD = os.environ.get("SMARTRENT_PASSWORD", "")
 
 _api = None
 
