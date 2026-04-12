@@ -12,6 +12,7 @@ from typing import Optional
 
 import requests
 
+from auth import is_authorized
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LLM_MODEL, OPENROUTER_API_KEY
 from parsers.strong import parse_csv
 
@@ -246,6 +247,10 @@ def handle_document(update: dict, db_path: Optional[str] = None, token: Optional
     doc = message.get("document")
     chat_id = str(message.get("chat", {}).get("id", ""))
 
+    # Security: deny unauthorized users
+    if not is_authorized(chat_id):
+        return None
+
     if not doc:
         return None
 
@@ -298,6 +303,10 @@ def poll_loop(db_path: Optional[str] = None, token: Optional[str] = None) -> Non
             elif "message" in update and "text" in update["message"]:
                 text = update["message"]["text"].strip()
                 chat_id = str(update["message"]["chat"]["id"])
+
+                # Security: deny unauthorized users silently
+                if not is_authorized(chat_id):
+                    continue
 
                 if text == "/status":
                     send_message("✅ Hermes Health Agent is running.", chat_id, token)

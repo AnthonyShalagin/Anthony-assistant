@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from auth import is_authorized
 from smart_home import (
     get_thermostat_status, set_thermostat,
     get_lock_status, set_lock,
@@ -52,6 +53,10 @@ def send_message(text: str, chat_id: Optional[str] = None) -> dict:
 
 def handle_message(text: str, chat_id: str) -> None:
     """Process an incoming message."""
+    # Security: deny unauthorized users silently
+    if not is_authorized(chat_id):
+        return
+
     text_lower = text.strip().lower()
 
     # Check for pending confirmation
@@ -115,6 +120,52 @@ def handle_message(text: str, chat_id: str) -> None:
         msg += "."
         send_message(msg, chat_id)
         return
+
+    # --- Schedule creation (must come BEFORE immediate set) ---
+    # Scheduling keywords: "every", "daily", "at X pm/am", "nightly", "each"
+    is_schedule = bool(re.search(r'\b(every|daily|nightly|each|at\s+\d{1,2}(:\d{2})?\s*(am|pm))\b', text_lower))
+
+    if is_schedule:
+        sched_match = re.search(
+            r'(?:set|schedule)?\s*(?:temp(?:erature)?\s+)?(?:to\s+)?(\d{2})\s*°?\s*(?:degrees?)?\s*(cool(?:ing)?|heat(?:ing)?)?\s*(?:every\s+)?(?:night|day|daily|morning|evening|afternoon)?\s*(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))',
+            text_lower,
+        )
+        if sched_match:
+            temp = int(sched_match.group(1))
+            mode = sched_match.group(2) or "cool"
+            if mode.startswith("cool"):
+                mode = "cool"
+            elif mode.startswith("heat"):
+                mode = "heat"
+            raw_time = sched_match.group(3).strip()
+            # Normalize time
+            if ":" not in raw_time:
+                raw_time = raw_time.replace("pm", ":00 PM").replace("am", ":00 AM").replace(" ", "")
+                if raw_time[-1].isdigit():
+                    raw_time += ":00"
+            time_str = raw_time.upper().replace("AM", " AM").replace("PM", " PM").strip()
+
+            # Generate a name
+            try:
+                hour = datetime.strptime(time_str, "%I:%M %p").hour
+            except ValueError:
+                hour = int(re.match(r'\d+', raw_time).group())
+
+            if hour >= 20 or hour <= 4:
+                name = "Nightly"
+            elif hour >= 5 and hour <= 11:
+                name = "Morning"
+            elif hour >= 12 and hour <= 16:
+                name = "Afternoon"
+            else:
+                name = "Evening"
+
+            result = add_schedule(name, temp, mode, time_str)
+            send_message(f"⏰ {result}", chat_id)
+            return
+        else:
+            send_message("I see you're trying to schedule something. Try: \"set temp to 68 every night at 10pm\"", chat_id)
+            return
 
     # Set temperature: "set to 70 cooling" / "set temp to 68" / "70 degrees"
     temp_match = re.search(
@@ -200,42 +251,6 @@ def handle_message(text: str, chat_id: str) -> None:
     if del_match:
         name = del_match.group(1)
         send_message(delete_schedule(name), chat_id)
-        return
-
-    # Create schedule: "set temp to 68 every night at 10pm"
-    sched_match = re.search(
-        r'(?:set|schedule)\s+(?:temp(?:erature)?\s+(?:to\s+)?)?(\d{2})\s*°?\s*(?:degrees?)?\s*(?:(cool(?:ing)?|heat(?:ing)?)\s+)?(?:every\s+)?(?:night|day|daily)?\s*(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
-        text_lower,
-    )
-    if sched_match:
-        temp = int(sched_match.group(1))
-        mode = sched_match.group(2) or "cool"
-        if mode.startswith("cool"):
-            mode = "cool"
-        elif mode.startswith("heat"):
-            mode = "heat"
-        raw_time = sched_match.group(3).strip()
-        # Normalize time
-        if ":" not in raw_time:
-            if "pm" in raw_time or "am" in raw_time:
-                raw_time = raw_time.replace("pm", ":00 PM").replace("am", ":00 AM")
-            else:
-                raw_time += ":00"
-        time_str = raw_time.upper()
-
-        # Generate a name
-        hour = datetime.strptime(time_str.replace(" ", ""), "%I:%M%p").hour if "M" in time_str else int(raw_time.split(":")[0])
-        if hour >= 20 or hour <= 4:
-            name = "Nightly"
-        elif hour >= 5 and hour <= 11:
-            name = "Morning"
-        elif hour >= 12 and hour <= 16:
-            name = "Afternoon"
-        else:
-            name = "Evening"
-
-        result = add_schedule(name, temp, mode, time_str)
-        send_message(f"⏰ {result}", chat_id)
         return
 
     # Unknown command

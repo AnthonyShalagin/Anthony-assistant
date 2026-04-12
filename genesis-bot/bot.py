@@ -10,6 +10,7 @@ from typing import Optional
 import requests
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from auth import is_authorized
 from genesis_api import send_command, VALID_COMMANDS
 from weather import auto_detect_command, get_current_temp, COLD_THRESHOLD, HOT_THRESHOLD
 
@@ -109,6 +110,10 @@ def send_message(text: str, chat_id: Optional[str] = None) -> dict:
 
 def handle_message(text: str, chat_id: str) -> None:
     """Process an incoming message and execute the command."""
+    # Security: deny unauthorized users silently
+    if not is_authorized(chat_id):
+        return
+
     text = text.strip().lower()
 
     # Help
