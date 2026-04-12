@@ -205,24 +205,16 @@ def handle_message(text: str, chat_id: str) -> None:
         send_message(f"{status['name']} is {state}.", chat_id)
         return
 
-    # Lock door
+    # Lock door — execute immediately, no confirmation
     if any(kw in text_lower for kw in ["lock the", "lock door", "lock it", "lock up"]) and "unlock" not in text_lower:
-        _pending[chat_id] = {
-            "type": "lock",
-            "action": "lock",
-            "expires": time.time() + 30,
-        }
-        send_message("🔒 Are you sure you want to lock the door?", chat_id)
+        result = run_async(set_lock(True))
+        send_message(f"🔒 {result}", chat_id)
         return
 
-    # Unlock door
+    # Unlock door — execute immediately, no confirmation
     if any(kw in text_lower for kw in ["unlock the", "unlock door", "unlock it", "open the door", "open door"]):
-        _pending[chat_id] = {
-            "type": "unlock",
-            "action": "unlock",
-            "expires": time.time() + 30,
-        }
-        send_message("🔓 Are you sure you want to unlock the door?", chat_id)
+        result = run_async(set_lock(False))
+        send_message(f"🔓 {result}", chat_id)
         return
 
     # --- Sensor commands ---

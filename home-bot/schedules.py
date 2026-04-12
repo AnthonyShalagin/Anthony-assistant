@@ -85,6 +85,24 @@ def list_schedules() -> str:
     return "\n".join(lines)
 
 
+WEEKDAYS = {"monday", "tuesday", "wednesday", "thursday", "friday"}
+WEEKENDS = {"saturday", "sunday"}
+
+
+def _day_matches(days_spec: str, current_day: str) -> bool:
+    """Check if the schedule's day spec matches today."""
+    days = days_spec.lower().strip()
+    if days == "daily":
+        return True
+    if days == "weekdays":
+        return current_day in WEEKDAYS
+    if days == "weekends":
+        return current_day in WEEKENDS
+    # Comma-separated list
+    day_set = {d.strip() for d in days.split(",")}
+    return current_day in day_set
+
+
 def get_due_schedules() -> list[dict]:
     """Get schedules that should run right now."""
     now = datetime.now(ET)
@@ -102,8 +120,7 @@ def get_due_schedules() -> list[dict]:
     for r in rows:
         sched_time = r["time"].strip().upper()
         if _times_match(sched_time, current_time):
-            days = r["days"].lower()
-            if days == "daily" or current_day in days:
+            if _day_matches(r["days"], current_day):
                 due.append(dict(r))
     return due
 

@@ -41,11 +41,12 @@ Available domains and tools:
 - HEALTH: Use health_ask for ANY question about sleep/recovery/HRV/strain/workouts. Use health_briefing only when asked for a briefing or summary.
 
 Critical rules:
-1. LOCK/UNLOCK CONFIRMATION: Before calling home_lock_set, ALWAYS ask the user to confirm. e.g. "Want me to lock the front door? (yes/no)". Only call the tool on their next confirmation message.
+1. Execute lock/unlock commands immediately — no confirmation needed.
 2. Be concise. Reply in 1-3 sentences. No fluff.
 3. Don't restate numbers the user can see in their apps.
 4. If multiple actions are requested ("start car and lock door"), call both tools in parallel.
-5. If a tool fails, tell the user what went wrong in plain English."""
+5. If a tool fails, tell the user what went wrong in plain English.
+6. For day-specific schedules ("weekdays", "weekends"), use the days parameter. For requests with multiple schedules, call home_schedule_add multiple times."""
 
 
 def send_message(text: str, chat_id: Optional[str] = None) -> dict:

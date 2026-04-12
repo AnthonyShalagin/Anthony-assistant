@@ -192,18 +192,20 @@ def home_sensors() -> dict:
         return {"success": False, "message": f"Sensor error: {e}"}
 
 
-def home_schedule_add(name: str, temperature: int, mode: str, time: str) -> dict:
+def home_schedule_add(name: str, temperature: int, mode: str, time: str, days: str = "daily") -> dict:
     """Create a recurring thermostat schedule.
 
     Args:
-        name: Schedule name (e.g. "Nightly").
+        name: Schedule name (e.g. "Nightly", "Weekday Morning").
         temperature: Target temp in F.
-        mode: 'cool', 'heat', etc.
+        mode: 'cool', 'heat', 'auto'.
         time: Time like "10:00 PM" or "22:00".
+        days: "daily", "weekdays", "weekends", or comma-separated days
+              (e.g. "monday,tuesday").
     """
     try:
         from schedules import add_schedule
-        msg = add_schedule(name, temperature, mode, time)
+        msg = add_schedule(name, temperature, mode, time, days)
         return {"success": True, "message": msg}
     except Exception as e:
         return {"success": False, "message": f"Schedule add error: {e}"}
@@ -326,7 +328,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "home_lock_set",
-            "description": "Lock or unlock the front door. Only call this AFTER the user has explicitly confirmed the action.",
+            "description": "Lock or unlock the front door. Execute immediately when requested — no confirmation needed.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -348,14 +350,15 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "home_schedule_add",
-            "description": "Create a recurring thermostat schedule. Use this when the user says 'every', 'daily', 'nightly', etc.",
+            "description": "Create a recurring thermostat schedule. Use this when the user says 'every', 'daily', 'nightly', 'weekdays', 'weekends', etc. For complex requests like 'X at 8am on weekdays, Y at 9am on weekends', call this tool MULTIPLE times (once per schedule).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "A short name for the schedule (e.g. 'Nightly', 'Morning')."},
+                    "name": {"type": "string", "description": "A short descriptive name (e.g. 'Nightly', 'Weekday Morning', 'Weekend Morning')."},
                     "temperature": {"type": "integer"},
                     "mode": {"type": "string", "enum": ["cool", "heat", "auto"]},
                     "time": {"type": "string", "description": "Time like '10:00 PM' or '7:00 AM'."},
+                    "days": {"type": "string", "description": "'daily', 'weekdays', 'weekends', or comma-separated like 'monday,wednesday,friday'. Defaults to 'daily'."},
                 },
                 "required": ["name", "temperature", "mode", "time"],
             },
