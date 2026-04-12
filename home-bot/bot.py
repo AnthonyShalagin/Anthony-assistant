@@ -1,19 +1,24 @@
-"""Home Control Telegram Bot.
+"""Home Control Telegram Bot — LLM-powered natural language.
 
 Controls SmartRent thermostat, lock, and sensors via Telegram.
+Uses Claude (via OpenRouter) with function calling to understand
+natural language.
 """
 
+import json
 import logging
-import re
-import time
+import os
 import threading
+import time
+from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import requests
+from dotenv import load_dotenv
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from auth import is_authorized
 from smart_home import (
     get_thermostat_status, set_thermostat,
@@ -21,6 +26,15 @@ from smart_home import (
     get_sensor_status, run_async,
 )
 from schedules import init_db, add_schedule, delete_schedule, list_schedules, get_due_schedules
+
+# Load .env
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "anthropic/claude-sonnet-4-6")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,13 +45,173 @@ logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Pending confirmations: chat_id -> {"action": ..., "expires": ...}
-_pending = {}
+_history: dict[str, list[dict]] = defaultdict(list)
+MAX_HISTORY_TURNS = 6
 
+
+SYSTEM_PROMPT = """You are the Home Control assistant — a focused agent for Anthony's apartment. You control:
+- Honeywell thermostat (via SmartRent)
+- Yale front door lock (via SmartRent)
+- Leak sensors (via SmartRent)
+
+Rules:
+- Execute lock/unlock commands immediately, no confirmation.
+- Be concise: 1-2 sentences.
+- For "set temp to X every Y" use schedule_add. For "set temp to X" (now) use thermostat_set.
+- For complex requests like "set 72 on weekdays, 68 on weekends" call schedule_add TWICE.
+- For day-specific schedules, use the days param: "weekdays", "weekends", "daily", or comma-separated days.
+- Don't restate obvious info. Just confirm what you did."""
+
+
+# ---- Tools ----
+
+def _tool_thermostat_status() -> dict:
+    return run_async(get_thermostat_status())
+
+def _tool_thermostat_set(temperature: int, mode: str = "cool") -> dict:
+    msg = run_async(set_thermostat(temperature, mode))
+    return {"success": True, "message": msg}
+
+def _tool_lock_status() -> dict:
+    return run_async(get_lock_status())
+
+def _tool_lock_set(locked: bool) -> dict:
+    msg = run_async(set_lock(locked))
+    return {"success": True, "message": msg}
+
+def _tool_sensors() -> dict:
+    return {"sensors": run_async(get_sensor_status())}
+
+def _tool_schedule_add(name: str, temperature: int, mode: str, time: str, days: str = "daily") -> dict:
+    return {"success": True, "message": add_schedule(name, temperature, mode, time, days)}
+
+def _tool_schedule_list() -> dict:
+    return {"success": True, "message": list_schedules()}
+
+def _tool_schedule_delete(name: str) -> dict:
+    return {"success": True, "message": delete_schedule(name)}
+
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "thermostat_status",
+            "description": "Get current indoor temp, humidity, mode, and setpoint.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "thermostat_set",
+            "description": "Set thermostat to a specific temperature NOW (not a recurring schedule).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "temperature": {"type": "integer"},
+                    "mode": {"type": "string", "enum": ["cool", "heat", "auto", "off"]},
+                },
+                "required": ["temperature", "mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lock_status",
+            "description": "Check whether the front door is locked.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lock_set",
+            "description": "Lock (true) or unlock (false) the front door immediately.",
+            "parameters": {
+                "type": "object",
+                "properties": {"locked": {"type": "boolean"}},
+                "required": ["locked"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sensors",
+            "description": "Check status of leak/motion sensors.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_add",
+            "description": "Create a recurring thermostat schedule. For complex requests like 'X on weekdays, Y on weekends', call this MULTIPLE times.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Short name (e.g. 'Weekday Morning', 'Nightly')."},
+                    "temperature": {"type": "integer"},
+                    "mode": {"type": "string", "enum": ["cool", "heat", "auto"]},
+                    "time": {"type": "string", "description": "Time like '10:00 PM' or '8:00 AM'."},
+                    "days": {"type": "string", "description": "'daily', 'weekdays', 'weekends', or comma-separated days. Defaults to 'daily'."},
+                },
+                "required": ["name", "temperature", "mode", "time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_list",
+            "description": "List all thermostat schedules.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_delete",
+            "description": "Delete a schedule by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+]
+
+TOOL_HANDLERS = {
+    "thermostat_status": _tool_thermostat_status,
+    "thermostat_set": _tool_thermostat_set,
+    "lock_status": _tool_lock_status,
+    "lock_set": _tool_lock_set,
+    "sensors": _tool_sensors,
+    "schedule_add": _tool_schedule_add,
+    "schedule_list": _tool_schedule_list,
+    "schedule_delete": _tool_schedule_delete,
+}
+
+
+def _call_tool(name: str, args: dict) -> dict:
+    handler = TOOL_HANDLERS.get(name)
+    if not handler:
+        return {"success": False, "message": f"Unknown tool: {name}"}
+    try:
+        return handler(**args)
+    except Exception as e:
+        logger.exception("Tool %s failed", name)
+        return {"success": False, "message": f"{name} failed: {e}"}
+
+
+# ---- Telegram ----
 
 def send_message(text: str, chat_id: Optional[str] = None) -> dict:
-    """Send a Telegram message."""
     cid = chat_id or TELEGRAM_CHAT_ID
     try:
         resp = requests.post(
@@ -51,202 +225,104 @@ def send_message(text: str, chat_id: Optional[str] = None) -> dict:
         return {}
 
 
+def _llm_call(messages: list[dict]) -> dict:
+    resp = requests.post(
+        OPENROUTER_URL,
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": LLM_MODEL,
+            "messages": messages,
+            "tools": TOOLS,
+            "max_tokens": 600,
+            "temperature": 0.3,
+        },
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def handle_message(text: str, chat_id: str) -> None:
-    """Process an incoming message."""
-    # Security: deny unauthorized users silently
     if not is_authorized(chat_id):
         return
 
-    text_lower = text.strip().lower()
+    text = text.strip()
+    if not text:
+        return
 
-    # Check for pending confirmation
-    if chat_id in _pending:
-        pending = _pending.pop(chat_id)
-        if time.time() > pending["expires"]:
-            send_message("Confirmation expired. Try again.", chat_id)
-            return
-        if text_lower in ("yes", "y", "confirm", "do it"):
-            action = pending["action"]
-            action_type = pending["type"]
-            if action_type == "lock":
-                result = run_async(set_lock(True))
-                send_message(f"🔒 {result}", chat_id)
-            elif action_type == "unlock":
-                result = run_async(set_lock(False))
-                send_message(f"🔓 {result}", chat_id)
-            return
-        else:
-            send_message("Cancelled.", chat_id)
-            return
-
-    # Help
-    if text_lower in ("/help", "help", "/start"):
+    if text.lower() in ("/help", "/start", "help"):
         send_message(
-            "🏠 Home Control\n\n"
-            "Thermostat:\n"
+            "🏠 Home Control — I understand natural language.\n\n"
+            "Try:\n"
             "• what's the temperature?\n"
-            "• set it to 70 cooling\n"
-            "• turn off thermostat\n\n"
-            "Lock:\n"
-            "• lock the door\n"
-            "• unlock the door\n"
-            "• is the door locked?\n\n"
-            "Sensors:\n"
-            "• check sensors\n\n"
-            "Schedules:\n"
-            "• set temp to 68 every night at 10pm\n"
-            "• show my schedules\n"
-            "• delete <name> schedule",
+            "• set to 68 now\n"
+            "• set 72 on weekdays at 8am, 68 on weekends at 9am\n"
+            "• lock the front door\n"
+            "• any leaks?\n"
+            "• show my schedules",
             chat_id,
         )
         return
 
-    # --- Thermostat commands ---
-
-    # Get temperature
-    if any(kw in text_lower for kw in ["temperature", "temp?", "how warm", "how cold", "thermostat status", "what's the temp"]):
-        status = run_async(get_thermostat_status())
-        if "error" in status:
-            send_message(f"❌ {status['error']}", chat_id)
-            return
-        mode = status["mode"] or "off"
-        setpoint = status["cooling_setpoint"] if mode == "cool" else status["heating_setpoint"]
-        msg = f"🌡️ It's {status['current_temp']}°F inside"
-        if status.get("current_humidity"):
-            msg += f" with {status['current_humidity']}% humidity"
-        msg += f". Thermostat is {mode}"
-        if mode != "off" and setpoint:
-            msg += f", set to {setpoint}°F"
-        msg += "."
-        send_message(msg, chat_id)
+    if text.lower() in ("/reset", "reset"):
+        _history[chat_id].clear()
+        send_message("🔄 Memory cleared.", chat_id)
         return
 
-    # --- Schedule creation (must come BEFORE immediate set) ---
-    # Scheduling keywords: "every", "daily", "at X pm/am", "nightly", "each"
-    is_schedule = bool(re.search(r'\b(every|daily|nightly|each|at\s+\d{1,2}(:\d{2})?\s*(am|pm))\b', text_lower))
+    history = _history[chat_id]
+    history.append({"role": "user", "content": text})
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
-    if is_schedule:
-        sched_match = re.search(
-            r'(?:set|schedule)?\s*(?:temp(?:erature)?\s+)?(?:to\s+)?(\d{2})\s*°?\s*(?:degrees?)?\s*(cool(?:ing)?|heat(?:ing)?)?\s*(?:every\s+)?(?:night|day|daily|morning|evening|afternoon)?\s*(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))',
-            text_lower,
-        )
-        if sched_match:
-            temp = int(sched_match.group(1))
-            mode = sched_match.group(2) or "cool"
-            if mode.startswith("cool"):
-                mode = "cool"
-            elif mode.startswith("heat"):
-                mode = "heat"
-            raw_time = sched_match.group(3).strip()
-            # Normalize time
-            if ":" not in raw_time:
-                raw_time = raw_time.replace("pm", ":00 PM").replace("am", ":00 AM").replace(" ", "")
-                if raw_time[-1].isdigit():
-                    raw_time += ":00"
-            time_str = raw_time.upper().replace("AM", " AM").replace("PM", " PM").strip()
+    try:
+        for _ in range(5):
+            response = _llm_call(messages)
+            choice = response["choices"][0]
+            msg = choice["message"]
+            tool_calls = msg.get("tool_calls")
 
-            # Generate a name
-            try:
-                hour = datetime.strptime(time_str, "%I:%M %p").hour
-            except ValueError:
-                hour = int(re.match(r'\d+', raw_time).group())
+            if not tool_calls:
+                content = msg.get("content", "").strip()
+                if content:
+                    history.append({"role": "assistant", "content": content})
+                    send_message(content, chat_id)
+                break
 
-            if hour >= 20 or hour <= 4:
-                name = "Nightly"
-            elif hour >= 5 and hour <= 11:
-                name = "Morning"
-            elif hour >= 12 and hour <= 16:
-                name = "Afternoon"
-            else:
-                name = "Evening"
+            assistant_msg = {"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls}
+            messages.append(assistant_msg)
+            history.append(assistant_msg)
 
-            result = add_schedule(name, temp, mode, time_str)
-            send_message(f"⏰ {result}", chat_id)
-            return
-        else:
-            send_message("I see you're trying to schedule something. Try: \"set temp to 68 every night at 10pm\"", chat_id)
-            return
+            for tc in tool_calls:
+                fn_name = tc["function"]["name"]
+                try:
+                    fn_args = json.loads(tc["function"]["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    fn_args = {}
 
-    # Set temperature: "set to 70 cooling" / "set temp to 68" / "70 degrees"
-    temp_match = re.search(
-        r'(?:set|change|make|put)?\s*(?:it|temp|thermostat|temperature)?\s*(?:to)?\s*(\d{2})\s*°?\s*(?:degrees?)?\s*(cool(?:ing)?|heat(?:ing)?|auto|off)?',
-        text_lower,
-    )
-    if not temp_match:
-        # Try simple "70 cooling" or "70 degrees"
-        temp_match = re.search(r'(\d{2})\s*°?\s*(?:degrees?)?\s*(cool(?:ing)?|heat(?:ing)?|auto|off)?', text_lower)
+                logger.info("Tool: %s(%s)", fn_name, fn_args)
+                result = _call_tool(fn_name, fn_args)
+                tool_msg = {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": json.dumps(result),
+                }
+                messages.append(tool_msg)
+                history.append(tool_msg)
 
-    if temp_match and 60 <= int(temp_match.group(1)) <= 85:
-        temp = int(temp_match.group(1))
-        mode = temp_match.group(2) or "cool"
-        if mode.startswith("cool"):
-            mode = "cool"
-        elif mode.startswith("heat"):
-            mode = "heat"
-        result = run_async(set_thermostat(temp, mode))
-        send_message(f"✅ {result}", chat_id)
-        return
+        # Trim history
+        user_idx = [i for i, m in enumerate(history) if m.get("role") == "user"]
+        if len(user_idx) > MAX_HISTORY_TURNS:
+            cutoff = user_idx[-MAX_HISTORY_TURNS]
+            _history[chat_id] = history[cutoff:]
 
-    # Turn off thermostat
-    if any(kw in text_lower for kw in ["turn off thermostat", "thermostat off", "hvac off", "ac off"]):
-        result = run_async(set_thermostat(72, "off"))
-        send_message(f"✅ {result}", chat_id)
-        return
-
-    # --- Lock commands ---
-
-    # Check lock status
-    if any(kw in text_lower for kw in ["is the door", "door locked", "lock status", "is it locked", "check lock", "door status"]):
-        status = run_async(get_lock_status())
-        if "error" in status:
-            send_message(f"❌ {status['error']}", chat_id)
-            return
-        state = "locked 🔒" if status["locked"] else "unlocked 🔓"
-        send_message(f"{status['name']} is {state}.", chat_id)
-        return
-
-    # Lock door — execute immediately, no confirmation
-    if any(kw in text_lower for kw in ["lock the", "lock door", "lock it", "lock up"]) and "unlock" not in text_lower:
-        result = run_async(set_lock(True))
-        send_message(f"🔒 {result}", chat_id)
-        return
-
-    # Unlock door — execute immediately, no confirmation
-    if any(kw in text_lower for kw in ["unlock the", "unlock door", "unlock it", "open the door", "open door"]):
-        result = run_async(set_lock(False))
-        send_message(f"🔓 {result}", chat_id)
-        return
-
-    # --- Sensor commands ---
-
-    if any(kw in text_lower for kw in ["sensor", "leak", "check sensor"]):
-        sensors = run_async(get_sensor_status())
-        if not sensors:
-            send_message("No sensors found.", chat_id)
-            return
-        lines = ["📡 Sensors:"]
-        for s in sensors:
-            status = "⚠️ LEAK DETECTED" if s["leak"] else "✅ No leak"
-            lines.append(f"  {s['name']}: {status}")
-        send_message("\n".join(lines), chat_id)
-        return
-
-    # --- Schedule commands ---
-
-    # Show schedules
-    if any(kw in text_lower for kw in ["show schedule", "my schedule", "list schedule", "schedules"]):
-        send_message(list_schedules(), chat_id)
-        return
-
-    # Delete schedule: "delete nightly schedule"
-    del_match = re.search(r'(?:delete|remove|cancel)\s+["\']?(\w+)["\']?\s*schedule', text_lower)
-    if del_match:
-        name = del_match.group(1)
-        send_message(delete_schedule(name), chat_id)
-        return
-
-    # Unknown command
-    send_message("❓ Didn't catch that. Text 'help' for commands.", chat_id)
+    except requests.RequestException as e:
+        logger.error("LLM call failed: %s", e)
+        send_message(f"❌ LLM error: {e}", chat_id)
+    except Exception as e:
+        logger.exception("Unexpected error")
+        send_message(f"❌ {e}", chat_id)
 
 
 def _schedule_loop():
@@ -263,24 +339,17 @@ def _schedule_loop():
                     logger.info("Running schedule: %s", sched["name"])
                     result = run_async(set_thermostat(sched["temperature"], sched["mode"]))
                     send_message(f"⏰ Schedule \"{sched['name']}\": {result}")
-
-            # Clean old keys
             if len(last_run) > 100:
                 last_run.clear()
         except Exception as e:
             logger.error("Schedule loop error: %s", e)
-
         time.sleep(30)
 
 
 def poll_loop() -> None:
-    """Run the Telegram polling loop."""
-    logger.info("Home Control bot starting...")
-
-    # Initialize schedule database
+    logger.info("Home Control bot starting (LLM-powered)...")
     init_db()
 
-    # Start schedule checker in background
     sched_thread = threading.Thread(target=_schedule_loop, daemon=True)
     sched_thread.start()
 
