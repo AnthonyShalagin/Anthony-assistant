@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -123,16 +124,35 @@ async def get_sensor_status() -> list[dict]:
     return results
 
 
+# Single persistent event loop, shared across the whole process.
+# The SmartRent client caches an aiohttp.ClientSession bound to the loop
+# it was created on — so we can't create a new loop per call (the session
+# would reference a closed loop and raise "Event loop is closed").
+_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop_ready = threading.Event()
+_loop_lock = threading.Lock()
+
+
+def _start_loop() -> None:
+    global _loop
+    _loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_loop)
+    _loop_ready.set()
+    _loop.run_forever()
+
+
+def _ensure_loop() -> asyncio.AbstractEventLoop:
+    with _loop_lock:
+        if _loop is None or not _loop_ready.is_set():
+            thread = threading.Thread(target=_start_loop, daemon=True, name="smart-home-loop")
+            thread.start()
+            _loop_ready.wait()
+    assert _loop is not None
+    return _loop
+
+
 def run_async(coro):
-    """Run an async function from sync context."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result(timeout=30)
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+    """Run an async coroutine on the persistent background loop."""
+    loop = _ensure_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=30)
