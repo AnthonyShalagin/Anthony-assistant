@@ -237,6 +237,10 @@ export const BIOMARKERS: Record<string, BiomarkerDef> = {
     description: "Family of blood proteins that includes antibodies. Elevations can signal chronic inflammation or infection.",
     ref_low: 1.9, ref_high: 3.7,
   },
+  "Albumin/Globulin Ratio": {
+    description: "Ratio of albumin to globulin in serum. Low values can indicate liver disease or chronic inflammation.",
+    ref_low: 1.0, ref_high: 2.5,
+  },
 
   // ---------- Kidney ----------
   BUN: {
@@ -254,6 +258,14 @@ export const BIOMARKERS: Record<string, BiomarkerDef> = {
   "BUN/Creatinine Ratio": {
     description: "Ratio used to distinguish dehydration from kidney problems.",
     ref_low: 10, ref_high: 28,
+  },
+  "Albumin, Urine": {
+    description: "Urine albumin — early marker of kidney damage, especially in diabetes and high blood pressure.",
+    ref_high: 1.4, lowerIsBetter: true,
+  },
+  "Anion Gap": {
+    description: "Calculated electrolyte balance. Out-of-range values flag acid-base disturbances.",
+    ref_low: 5, ref_high: 17,
   },
 
   // ---------- Electrolytes ----------
@@ -301,6 +313,28 @@ export const BIOMARKERS: Record<string, BiomarkerDef> = {
   "Monocytes, Absolute": {
     description: "Absolute monocyte count. Mild elevations can follow viral infections or chronic inflammation.",
     ref_low: 200, ref_high: 950,
+  },
+  "Neutrophils, Absolute": {
+    description: "Absolute neutrophil count. Low values can indicate bone-marrow issues; high values follow bacterial infection.",
+    ref_low: 1500, ref_high: 7800,
+  },
+  "Lymphocytes, Absolute": {
+    description: "Absolute lymphocyte count. Persistently low can suggest immune suppression; high can indicate viral infection.",
+    ref_low: 850, ref_high: 3900,
+  },
+  "Basophils, Absolute": {
+    description: "Absolute basophil count. Rare WBC type — elevations can be triggered by allergies or rare blood disorders.",
+    ref_low: 0, ref_high: 200,
+  },
+
+  // ---------- Urine ----------
+  "Specific Gravity (urine)": {
+    description: "How concentrated your urine is. Tracks hydration status.",
+    ref_low: 1.001, ref_high: 1.035,
+  },
+  "pH (urine)": {
+    description: "Urine acidity — affects kidney-stone formation risk and tracks dietary patterns.",
+    ref_low: 5.0, ref_high: 8.0,
   },
 
   // ---------- Other ----------
