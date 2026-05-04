@@ -138,6 +138,35 @@ export const BIOMARKERS: Record<string, BiomarkerDef> = {
     ref_low: 4, ref_high: 22,
   },
 
+  // ---------- Male Health ----------
+  "Testosterone, Total": {
+    description: "Total testosterone — the primary male androgen. Drives muscle, libido, mood, and energy. Declines ~1%/year after 30.",
+    ref_low: 250, ref_high: 1100,
+  },
+  "Testosterone, Free": {
+    description: "Unbound testosterone available to your tissues. Often a better real-world indicator than total.",
+    ref_low: 47, ref_high: 244,
+  },
+  SHBG: {
+    description: "Sex hormone binding globulin — the protein that holds testosterone. High SHBG can lower the free fraction.",
+    ref_low: 16, ref_high: 55,
+  },
+  "DHEA Sulfate": {
+    description: "Adrenal precursor to testosterone and estrogen. Tracks adrenal output and tends to decline with age.",
+    ref_low: 100, ref_high: 380,
+  },
+  "PSA, Total": {
+    description: "Prostate-specific antigen — screening marker for prostate health. Rises with prostate inflammation, BPH, or cancer.",
+    ref_high: 4.0, lowerIsBetter: true,
+  },
+  "PSA, Free": {
+    description: "Unbound PSA — used alongside total PSA to refine prostate-cancer risk.",
+  },
+  "PSA, Free %": {
+    description: "Free PSA as a percentage of total. Higher percentages (>25%) are associated with lower prostate-cancer risk.",
+    ref_low: 25,
+  },
+
   // ---------- Inflammation ----------
   "hs-CRP": {
     description: "High-sensitivity C-reactive protein — measures low-grade systemic inflammation linked to heart disease.",
