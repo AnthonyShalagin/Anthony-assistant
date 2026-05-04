@@ -1,9 +1,10 @@
-import { Card } from "@/components/card";
 import { StrengthClient } from "./strength-client";
-import { getStrongSets } from "@/lib/mock";
+import { fetchStrongSets } from "@/lib/data";
 
-export default function StrengthPage() {
-  const sets = getStrongSets(12);
+export const dynamic = "force-dynamic";
+
+export default async function StrengthPage() {
+  const sets = await fetchStrongSets(12);
   return (
     <div className="space-y-8">
       <div className="flex items-baseline justify-between">

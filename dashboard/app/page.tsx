@@ -1,14 +1,19 @@
 import { Card, MetricCard } from "@/components/card";
 import { TrendArea, BarSeries } from "@/components/charts";
 import { RecoveryRing } from "@/components/recovery-ring";
-import { getDailyMetrics, getInBodyScans, getSleepDetails } from "@/lib/mock";
+import { fetchDailyMetrics, fetchInBody, fetchSleepDetails } from "@/lib/data";
+import { getSleepDetails as mockSleep } from "@/lib/mock";
 
-export default function TodayPage() {
-  const days = getDailyMetrics(30);
+export const dynamic = "force-dynamic";
+
+export default async function TodayPage() {
+  const [days, sleep, inbody] = await Promise.all([
+    fetchDailyMetrics(30),
+    fetchSleepDetails(7),
+    fetchInBody(),
+  ]);
   const today = days[days.length - 1];
   const yesterday = days[days.length - 2];
-  const sleep = getSleepDetails(7);
-  const inbody = getInBodyScans();
   const latestInBody = inbody[inbody.length - 1];
 
   const delta = (a: number, b: number, unit = "") => {
@@ -107,7 +112,7 @@ export default function TodayPage() {
   );
 }
 
-function SleepBreakdown({ s }: { s: ReturnType<typeof getSleepDetails>[number] }) {
+function SleepBreakdown({ s }: { s: ReturnType<typeof mockSleep>[number] }) {
   const total = s.deep_min + s.rem_min + s.light_min;
   const rows = [
     { label: "Deep", min: s.deep_min, color: "var(--color-sleep)" },
@@ -147,7 +152,7 @@ function SleepBreakdown({ s }: { s: ReturnType<typeof getSleepDetails>[number] }
 
 import { StackedBars } from "@/components/charts";
 
-function SleepStages({ data }: { data: ReturnType<typeof getSleepDetails> }) {
+function SleepStages({ data }: { data: ReturnType<typeof mockSleep> }) {
   return (
     <StackedBars
       data={data}

@@ -1,9 +1,10 @@
-import { Card } from "@/components/card";
-import { getBloodwork } from "@/lib/mock";
+import { fetchBloodwork } from "@/lib/data";
 import { cn } from "@/lib/cn";
 
-export default function BloodworkPage() {
-  const markers = getBloodwork();
+export const dynamic = "force-dynamic";
+
+export default async function BloodworkPage() {
+  const markers = await fetchBloodwork();
   const panelDates = Array.from(new Set(markers.map((m) => m.panel_date))).sort();
   const latestDate = panelDates[panelDates.length - 1];
   const prevDate = panelDates[panelDates.length - 2];

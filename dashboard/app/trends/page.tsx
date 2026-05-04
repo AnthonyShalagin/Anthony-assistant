@@ -1,9 +1,11 @@
 import { Card } from "@/components/card";
 import { TrendArea, TrendLine, BarSeries } from "@/components/charts";
-import { getDailyMetrics } from "@/lib/mock";
+import { fetchDailyMetrics } from "@/lib/data";
 
-export default function TrendsPage() {
-  const data = getDailyMetrics(90);
+export const dynamic = "force-dynamic";
+
+export default async function TrendsPage() {
+  const data = await fetchDailyMetrics(90);
   const last30 = data.slice(-30);
 
   const avg = (arr: number[]) =>

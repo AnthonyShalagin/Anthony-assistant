@@ -1,10 +1,12 @@
 import { Card } from "@/components/card";
-import { GOALS, getDailyMetrics, getInBodyScans } from "@/lib/mock";
+import { GOALS } from "@/lib/mock";
+import { fetchDailyMetrics, fetchInBody } from "@/lib/data";
 import { format, parseISO, startOfWeek } from "date-fns";
 
-export default function GoalsPage() {
-  const metrics = getDailyMetrics(90);
-  const inbody = getInBodyScans();
+export const dynamic = "force-dynamic";
+
+export default async function GoalsPage() {
+  const [metrics, inbody] = await Promise.all([fetchDailyMetrics(90), fetchInBody()]);
 
   // Compute weekly aggregates
   const weekly = aggregateWeekly(metrics);
@@ -128,7 +130,7 @@ function GoalCard({
   );
 }
 
-function aggregateWeekly(metrics: ReturnType<typeof getDailyMetrics>) {
+function aggregateWeekly(metrics: Awaited<ReturnType<typeof fetchDailyMetrics>>) {
   const byWeek = new Map<string, { steps: number[]; sleep: number[] }>();
   for (const m of metrics) {
     const wk = format(startOfWeek(parseISO(m.date), { weekStartsOn: 1 }), "yyyy-MM-dd");
@@ -146,7 +148,7 @@ function aggregateWeekly(metrics: ReturnType<typeof getDailyMetrics>) {
     .sort((a, b) => a.week.localeCompare(b.week));
 }
 
-function BFHistory({ inbody, target }: { inbody: ReturnType<typeof getInBodyScans>; target: number }) {
+function BFHistory({ inbody, target }: { inbody: Awaited<ReturnType<typeof fetchInBody>>; target: number }) {
   return (
     <div className="space-y-2">
       {inbody.map((s, idx) => {
