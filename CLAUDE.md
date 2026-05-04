@@ -32,6 +32,15 @@ Each bot runs as its own systemd service on the VPS.
   not Vercel).
 - **Keep user-facing output short.** Don't restate data they can see in
   their own apps. Surface patterns, not numbers.
+- **Extract by row-shape, not by allowlist.** When parsing structured docs
+  (lab PDFs, CSVs, tables), match the row pattern (`label | value | range
+  | unit`) and pull *every* row, then categorize. Never grep for a hardcoded
+  list of names — you'll silently drop everything you didn't think to add.
+- **Spot-check counts before declaring done.** After extraction or
+  ingestion, sanity-check the result against the source's expected size
+  (e.g. a Function Health panel ≈ 70-100 markers; if you got 25, that's a
+  flag, not a finish line). Verify with a lightweight query/script before
+  reporting completion to the user.
 
 ## Working on this repo
 

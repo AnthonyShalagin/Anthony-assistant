@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { getDef } from "@/lib/biomarker-info";
+import { getDef, canonicalStatus } from "@/lib/biomarker-info";
 import {
   Area,
   AreaChart,
@@ -47,38 +47,56 @@ const CATEGORY_ORDER = [
 ];
 
 type Bucket = "all" | "out" | "in" | "other";
+type HistoryPoint = { date: string; value: number; status: string };
+
+/**
+ * Apply canonical reference ranges from biomarker-info.ts. This overrides
+ * the per-panel ranges that come from the lab so status is consistent
+ * across panels (otherwise the same value can be "in range" at one lab
+ * and "out of range" at another).
+ */
+function applyCanonical(m: Marker): Marker {
+  const def = getDef(m.marker);
+  if (!def) return m;
+  const ref_low = def.ref_low ?? m.ref_low;
+  const ref_high = def.ref_high ?? m.ref_high;
+  const status = canonicalStatus(m.marker, m.value);
+  return { ...m, ref_low, ref_high, status };
+}
 
 export function BloodworkClient({ markers }: { markers: Marker[] }) {
+  const normalized = useMemo(() => markers.map(applyCanonical), [markers]);
+
   const [query, setQuery] = useState("");
   const [bucket, setBucket] = useState<Bucket>("all");
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>("All");
+  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ top: number; left: number } | null>(null);
 
-  // Build per-marker history
+  // Build per-marker history (using canonical statuses)
   const historyByMarker = useMemo(() => {
-    const m = new Map<string, { date: string; value: number; status: string }[]>();
-    for (const x of markers) {
+    const m = new Map<string, HistoryPoint[]>();
+    for (const x of normalized) {
       const list = m.get(x.marker) ?? [];
       list.push({ date: x.panel_date, value: x.value, status: x.status });
       m.set(x.marker, list);
     }
     for (const list of m.values()) list.sort((a, b) => a.date.localeCompare(b.date));
     return m;
-  }, [markers]);
+  }, [normalized]);
 
   // Latest reading per marker
   const latestByMarker = useMemo(() => {
     const m = new Map<string, Marker>();
-    for (const x of markers) {
+    for (const x of normalized) {
       const cur = m.get(x.marker);
       if (!cur || x.panel_date > cur.panel_date) m.set(x.marker, x);
     }
     return m;
-  }, [markers]);
+  }, [normalized]);
 
   const allLatest = useMemo(() => [...latestByMarker.values()], [latestByMarker]);
 
-  // Counts for the status pills
   const counts = useMemo(() => {
     let inRange = 0,
       outRange = 0,
@@ -91,14 +109,12 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
     return { all: allLatest.length, in: inRange, out: outRange, other };
   }, [allLatest]);
 
-  // Categories present
   const categories = useMemo(() => {
     const set = new Set<string>();
     for (const m of allLatest) set.add(m.category);
     return ["All", ...CATEGORY_ORDER.filter((c) => set.has(c)), ...[...set].filter((c) => !CATEGORY_ORDER.includes(c)).sort()];
   }, [allLatest]);
 
-  // Filter
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return allLatest.filter((m) => {
@@ -106,12 +122,15 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
       if (bucket === "in" && !(m.status === "optimal" || m.status === "normal")) return false;
       if (bucket === "out" && !(m.status === "high" || m.status === "low")) return false;
       if (bucket === "other" && (m.status === "optimal" || m.status === "normal" || m.status === "high" || m.status === "low")) return false;
-      if (q && !m.marker.toLowerCase().includes(q)) return false;
+      if (q) {
+        const def = getDef(m.marker);
+        const display = (def?.display ?? m.marker).toLowerCase();
+        if (!display.includes(q) && !m.marker.toLowerCase().includes(q)) return false;
+      }
       return true;
     });
   }, [allLatest, activeCategory, bucket, query]);
 
-  // Group filtered by category for rendering
   const groupedByCategory = useMemo(() => {
     const m = new Map<string, Marker[]>();
     for (const x of filtered) {
@@ -134,35 +153,23 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
   const latestDate = panelDates[panelDates.length - 1] ?? "—";
   const earliestDate = panelDates[0] ?? "—";
 
+  const hoveredFull = hoveredMarker
+    ? latestByMarker.get(hoveredMarker)
+    : null;
+  const hoveredHistory = hoveredMarker ? historyByMarker.get(hoveredMarker) ?? [] : [];
+
   return (
     <div className="space-y-6">
       {/* Header summary */}
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-          <div className="text-2xl font-semibold tracking-tight">{counts.all} Biomarkers</div>
-          <div className="mt-4 flex items-end gap-8">
-            <CountBar
-              label="In Range"
-              count={counts.in}
-              total={counts.all}
-              color="var(--color-recovery)"
-            />
-            <CountBar
-              label="Out of Range"
-              count={counts.out}
-              total={counts.all}
-              color="var(--color-alert)"
-            />
-            <CountBar
-              label="Other"
-              count={counts.other}
-              total={counts.all}
-              color="#6b6b6b"
-            />
-          </div>
-          <div className="mt-4 text-xs text-[var(--color-text-faint)]">
-            Latest panel: {latestDate} · History: {earliestDate} → {latestDate} · {panelDates.length} panels · {markers.length} measurements
-          </div>
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+        <div className="text-2xl font-semibold tracking-tight">{counts.all} Biomarkers</div>
+        <div className="mt-4 flex items-end gap-8">
+          <CountBar label="In Range" count={counts.in} total={counts.all} color="var(--color-recovery)" />
+          <CountBar label="Out of Range" count={counts.out} total={counts.all} color="var(--color-alert)" />
+          <CountBar label="Other" count={counts.other} total={counts.all} color="#6b6b6b" />
+        </div>
+        <div className="mt-4 text-xs text-[var(--color-text-faint)]">
+          Latest panel: {latestDate} · History: {earliestDate} → {latestDate} · {panelDates.length} panels · {markers.length} measurements · canonical ranges applied
         </div>
       </div>
 
@@ -227,15 +234,34 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
                     key={m.marker}
                     marker={m}
                     history={historyByMarker.get(m.marker) ?? []}
-                    expanded={expanded === m.marker}
-                    onToggle={() => setExpanded(expanded === m.marker ? null : m.marker)}
                     isLast={idx === list.length - 1}
+                    onHoverEnter={(rect) => {
+                      setHoveredMarker(m.marker);
+                      // Position popover next to the row, on the right side if there's space
+                      const top = rect.top + window.scrollY + rect.height / 2 - 100;
+                      const left = Math.min(rect.right + 12, window.innerWidth - 460);
+                      setHoverPos({ top, left });
+                    }}
+                    onHoverLeave={() => {
+                      setHoveredMarker(null);
+                      setHoverPos(null);
+                    }}
                   />
                 ))}
               </div>
             </section>
           ))}
         </div>
+      )}
+
+      {/* Floating hover popover */}
+      {hoveredFull && hoverPos && (
+        <HoverPopover
+          marker={hoveredFull}
+          history={hoveredHistory}
+          top={hoverPos.top}
+          left={hoverPos.left}
+        />
       )}
     </div>
   );
@@ -300,15 +326,15 @@ function FilterPill({
 function MarkerRow({
   marker,
   history,
-  expanded,
-  onToggle,
   isLast,
+  onHoverEnter,
+  onHoverLeave,
 }: {
   marker: Marker;
-  history: { date: string; value: number; status: string }[];
-  expanded: boolean;
-  onToggle: () => void;
+  history: HistoryPoint[];
   isLast: boolean;
+  onHoverEnter: (rect: DOMRect) => void;
+  onHoverLeave: () => void;
 }) {
   const def = getDef(marker.marker);
   const color = STATUS_COLOR[marker.status] ?? "#6b6b6b";
@@ -316,39 +342,38 @@ function MarkerRow({
   const inRange = marker.status === "optimal" || marker.status === "normal";
 
   return (
-    <div className={cn("group", !isLast && "border-b border-[var(--color-border)]")}>
-      <button
-        onClick={onToggle}
-        className="grid w-full grid-cols-[4px_1fr_auto] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)]"
-      >
-        {/* Status bar */}
-        <span
-          className="h-10 w-1 rounded-full"
-          style={{ background: color }}
-        />
-        {/* Name + status */}
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-[var(--color-text)]">{display}</div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--color-text-dim)]">
-            <span style={{ color }}>{inRange ? "In Range" : marker.status === "high" ? "Above Range" : marker.status === "low" ? "Below Range" : "Other"}</span>
-            <span>·</span>
-            <span className="metric-num tabular-nums text-[var(--color-text)]">
-              {marker.value}
-              {marker.unit ? ` ${marker.unit}` : ""}
-            </span>
-          </div>
+    <div
+      className={cn(
+        "group grid grid-cols-[4px_1fr_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-[var(--color-surface-2)] cursor-default",
+        !isLast && "border-b border-[var(--color-border)]"
+      )}
+      onMouseEnter={(e) => onHoverEnter(e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={onHoverLeave}
+    >
+      {/* Status bar */}
+      <span className="h-10 w-1 rounded-full" style={{ background: color }} />
+      {/* Name + status */}
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium text-[var(--color-text)]">{display}</div>
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--color-text-dim)]">
+          <span style={{ color }}>
+            {inRange ? "In Range" : marker.status === "high" ? "Above Range" : marker.status === "low" ? "Below Range" : "Other"}
+          </span>
+          <span>·</span>
+          <span className="metric-num tabular-nums text-[var(--color-text)]">
+            {marker.value}
+            {marker.unit ? ` ${marker.unit}` : ""}
+          </span>
         </div>
-        {/* Mini sparkline */}
-        {history.length >= 2 ? (
-          <div className="hidden h-8 w-32 sm:block">
-            <Sparkline history={history} color={color} refLow={marker.ref_low} refHigh={marker.ref_high} />
-          </div>
-        ) : (
-          <span className="text-[10px] text-[var(--color-text-faint)]">single panel</span>
-        )}
-      </button>
-
-      {expanded && <DetailPanel marker={marker} history={history} />}
+      </div>
+      {/* Mini sparkline */}
+      {history.length >= 2 ? (
+        <div className="hidden h-8 w-32 sm:block">
+          <Sparkline history={history} color={color} refLow={marker.ref_low} refHigh={marker.ref_high} />
+        </div>
+      ) : (
+        <span className="text-[10px] text-[var(--color-text-faint)]">single panel</span>
+      )}
     </div>
   );
 }
@@ -359,7 +384,7 @@ function Sparkline({
   refLow,
   refHigh,
 }: {
-  history: { date: string; value: number; status: string }[];
+  history: HistoryPoint[];
   color: string;
   refLow: number | null;
   refHigh: number | null;
@@ -390,111 +415,80 @@ function Sparkline({
   );
 }
 
-function DetailPanel({
+function HoverPopover({
   marker,
   history,
+  top,
+  left,
 }: {
   marker: Marker;
-  history: { date: string; value: number; status: string }[];
+  history: HistoryPoint[];
+  top: number;
+  left: number;
 }) {
   const def = getDef(marker.marker);
+  const display = def?.display ?? marker.marker;
   const color = STATUS_COLOR[marker.status] ?? "#6b6b6b";
 
   return (
-    <div className="bg-[var(--color-surface-2)] px-6 py-5">
-      <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
-        {/* Left: definition + range */}
-        <div>
-          {def?.description ? (
-            <p className="text-sm leading-relaxed text-[var(--color-text-dim)]">{def.description}</p>
-          ) : (
-            <p className="text-sm italic text-[var(--color-text-faint)]">
-              No description yet for this marker.
-            </p>
-          )}
-          <div className="mt-4 space-y-1.5 text-xs">
-            <div className="flex justify-between">
-              <span className="text-[var(--color-text-faint)]">Reference range</span>
-              <span className="metric-num tabular-nums text-[var(--color-text)]">
-                {marker.ref_low != null && marker.ref_high != null
-                  ? `${marker.ref_low}–${marker.ref_high}`
-                  : marker.ref_high != null
-                  ? `≤ ${marker.ref_high}`
-                  : marker.ref_low != null
-                  ? `≥ ${marker.ref_low}`
-                  : "—"}{" "}
-                {marker.unit}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--color-text-faint)]">Status</span>
-              <span style={{ color }} className="font-medium uppercase tracking-wider">
-                {marker.status}
-              </span>
-            </div>
-            {def?.lowerIsBetter && (
-              <div className="flex justify-between">
-                <span className="text-[var(--color-text-faint)]">Direction</span>
-                <span className="text-[var(--color-text-dim)]">Lower is better</span>
-              </div>
-            )}
-          </div>
-        </div>
+    <div
+      className="pointer-events-none fixed z-50 w-[440px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5 shadow-2xl"
+      style={{ top, left }}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-semibold text-[var(--color-text)]">{display}</span>
+        <span
+          className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wider"
+          style={{ background: `${color}22`, color }}
+        >
+          {marker.status.toUpperCase()}
+        </span>
+      </div>
+      {def?.description && (
+        <p className="mt-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
+          {def.description}
+        </p>
+      )}
 
-        {/* Right: trend chart */}
-        <div className="-mx-2">
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={history} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+      <div className="mt-4 grid grid-cols-[auto_1fr] gap-4 items-center">
+        <ZoneBars marker={marker} />
+        <div className="-ml-2">
+          <ResponsiveContainer width="100%" height={120}>
+            <AreaChart data={history} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id={`detail-${marker.marker.replace(/\W/g, "")}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+                <linearGradient id={`pop-${marker.marker.replace(/\W/g, "")}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity={0.3} />
                   <stop offset="100%" stopColor={color} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis
                 dataKey="date"
                 stroke="#6b6b6b"
-                fontSize={10}
+                fontSize={9}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(v: string) => v.slice(2, 7)}
                 minTickGap={20}
               />
-              <YAxis
-                stroke="#6b6b6b"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                width={36}
-              />
+              <YAxis hide domain={getDomain(marker, history)} />
               {marker.ref_low != null && (
-                <ReferenceLine
-                  y={marker.ref_low}
-                  stroke="#3a3a3a"
-                  strokeDasharray="3 3"
-                  label={{ value: `≥ ${marker.ref_low}`, fill: "#6b6b6b", fontSize: 10, position: "insideLeft" }}
-                />
+                <ReferenceLine y={marker.ref_low} stroke="#3a3a3a" strokeDasharray="3 3" />
               )}
               {marker.ref_high != null && (
-                <ReferenceLine
-                  y={marker.ref_high}
-                  stroke="#3a3a3a"
-                  strokeDasharray="3 3"
-                  label={{ value: `≤ ${marker.ref_high}`, fill: "#6b6b6b", fontSize: 10, position: "insideLeft" }}
-                />
+                <ReferenceLine y={marker.ref_high} stroke="#3a3a3a" strokeDasharray="3 3" />
               )}
               <Area
                 type="monotone"
                 dataKey="value"
                 stroke={color}
                 strokeWidth={2}
-                fill={`url(#detail-${marker.marker.replace(/\W/g, "")})`}
+                fill={`url(#pop-${marker.marker.replace(/\W/g, "")})`}
                 dot={(props: { cx?: number; cy?: number; payload?: { status: string }; index?: number }) => {
                   const { cx = 0, cy = 0, payload, index } = props;
                   const c = STATUS_COLOR[payload?.status ?? "normal"] ?? "#6b6b6b";
                   return (
                     <circle
-                      key={`dot-${index ?? cx}-${cy}`}
+                      key={`d-${index ?? cx}-${cy}`}
                       cx={cx}
                       cy={cy}
                       r={3}
@@ -504,24 +498,81 @@ function DetailPanel({
                     />
                   );
                 }}
-                activeDot={{ r: 5 }}
-              />
-              <Tooltip
-                cursor={{ stroke: "#262626" }}
-                contentStyle={{
-                  background: "#0a0a0a",
-                  border: "1px solid #262626",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  color: "#f5f5f5",
-                }}
-                labelStyle={{ color: "#a1a1a1", fontSize: 10 }}
-                formatter={(v) => [`${v}${marker.unit ? " " + marker.unit : ""}`, marker.marker] as [string, string]}
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
+
+      <div className="mt-2 flex items-center justify-between text-[10px] tabular-nums text-[var(--color-text-faint)]">
+        <span>
+          Latest: <span className="text-[var(--color-text)] metric-num">{marker.value}{marker.unit ? ` ${marker.unit}` : ""}</span>
+        </span>
+        <span>
+          {marker.ref_low != null && marker.ref_high != null
+            ? `Range ${marker.ref_low}–${marker.ref_high}${marker.unit ? ` ${marker.unit}` : ""}`
+            : marker.ref_high != null
+            ? `≤ ${marker.ref_high}${marker.unit ? ` ${marker.unit}` : ""}`
+            : marker.ref_low != null
+            ? `≥ ${marker.ref_low}${marker.unit ? ` ${marker.unit}` : ""}`
+            : ""}
+        </span>
+      </div>
     </div>
   );
+}
+
+function ZoneBars({ marker }: { marker: Marker }) {
+  // Vertical zone visualization like Function Health: stacked colored zones
+  // representing Above / In / Below range. The "current" zone is highlighted.
+  const zones: { label: string; key: string; color: string }[] = [];
+  if (marker.ref_high != null) {
+    zones.push({ label: "Above Range", key: "high", color: "var(--color-alert)" });
+  }
+  zones.push({ label: "In Range", key: "in", color: "var(--color-recovery)" });
+  if (marker.ref_low != null) {
+    zones.push({ label: "Below Range", key: "low", color: "var(--color-warn)" });
+  }
+
+  const isCurrent = (key: string) => {
+    if (key === "high") return marker.status === "high";
+    if (key === "low") return marker.status === "low";
+    return marker.status === "optimal" || marker.status === "normal";
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {zones.map((z) => (
+        <div key={z.key} className="flex items-center gap-2">
+          <div
+            className="h-6 w-1.5 rounded"
+            style={{
+              background: z.color,
+              opacity: isCurrent(z.key) ? 1 : 0.25,
+            }}
+          />
+          <span
+            className="text-[10px]"
+            style={{
+              color: isCurrent(z.key) ? z.color : "var(--color-text-faint)",
+              fontWeight: isCurrent(z.key) ? 600 : 400,
+            }}
+          >
+            {z.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getDomain(marker: Marker, history: HistoryPoint[]): [number, number] {
+  const values = history.map((h) => h.value);
+  const refs = [marker.ref_low, marker.ref_high].filter((x): x is number => x != null);
+  const all = [...values, ...refs];
+  if (all.length === 0) return [0, 1];
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  const pad = Math.max((max - min) * 0.15, 0.5);
+  return [min - pad, max + pad];
 }
