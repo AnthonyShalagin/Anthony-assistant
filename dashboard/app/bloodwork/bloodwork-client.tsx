@@ -32,6 +32,22 @@ const STATUS_COLOR: Record<string, string> = {
   low: "var(--color-warn)",
 };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Format an ISO date as "Jun '25". */
+function formatShort(iso: string): string {
+  const [y, m] = iso.split("-");
+  const month = MONTHS[parseInt(m, 10) - 1] ?? m;
+  return `${month} '${y.slice(2)}`;
+}
+
+/** Format an ISO date as "Jun 13, 2025". */
+function formatFull(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  const month = MONTHS[parseInt(m, 10) - 1] ?? m;
+  return `${month} ${parseInt(d, 10)}, ${y}`;
+}
+
 const CATEGORY_ORDER = [
   "Heart",
   "Metabolic",
@@ -467,8 +483,8 @@ function HoverPopover({
       <div className="mt-4 grid grid-cols-[auto_1fr] gap-4 items-center">
         <ZoneBars marker={marker} />
         <div className="-ml-2">
-          <ResponsiveContainer width="100%" height={120}>
-            <AreaChart data={history} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={140}>
+            <AreaChart data={history} margin={{ top: 28, right: 16, left: 8, bottom: 4 }}>
               <defs>
                 <linearGradient id={`pop-${marker.marker.replace(/\W/g, "")}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={color} stopOpacity={0.3} />
@@ -477,12 +493,13 @@ function HoverPopover({
               </defs>
               <XAxis
                 dataKey="date"
-                stroke="#6b6b6b"
-                fontSize={9}
+                stroke="#a1a1a1"
+                fontSize={11}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(v: string) => v.slice(2, 7)}
-                minTickGap={20}
+                tickFormatter={formatShort}
+                interval={0}
+                padding={{ left: 24, right: 24 }}
               />
               <YAxis hide domain={getDomain(marker, history)} />
               {marker.ref_low != null && (
@@ -497,19 +514,32 @@ function HoverPopover({
                 stroke={color}
                 strokeWidth={2}
                 fill={`url(#pop-${marker.marker.replace(/\W/g, "")})`}
-                dot={(props: { cx?: number; cy?: number; payload?: { status: string }; index?: number }) => {
+                dot={(props: { cx?: number; cy?: number; payload?: HistoryPoint; index?: number }) => {
                   const { cx = 0, cy = 0, payload, index } = props;
                   const c = STATUS_COLOR[payload?.status ?? "normal"] ?? "#6b6b6b";
+                  // Stagger value labels above/below to avoid overlap
+                  const labelY = (index ?? 0) % 2 === 0 ? cy - 10 : cy - 10;
                   return (
-                    <circle
-                      key={`d-${index ?? cx}-${cy}`}
-                      cx={cx}
-                      cy={cy}
-                      r={3}
-                      fill={c}
-                      stroke="#0a0a0a"
-                      strokeWidth={1}
-                    />
+                    <g key={`d-${index ?? cx}-${cy}`}>
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={4}
+                        fill={c}
+                        stroke="#0a0a0a"
+                        strokeWidth={2}
+                      />
+                      <text
+                        x={cx}
+                        y={labelY}
+                        textAnchor="middle"
+                        fontSize={11}
+                        fill={c}
+                        fontWeight={600}
+                      >
+                        {payload?.value}
+                      </text>
+                    </g>
                   );
                 }}
               />
@@ -518,11 +548,16 @@ function HoverPopover({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center justify-between text-[10px] tabular-nums text-[var(--color-text-faint)]">
+      <div className="mt-3 flex items-center justify-between text-[11px] tabular-nums text-[var(--color-text-dim)]">
         <span>
-          Latest: <span className="text-[var(--color-text)] metric-num">{marker.value}{marker.unit ? ` ${marker.unit}` : ""}</span>
+          Latest{" "}
+          <span className="metric-num text-[var(--color-text)] text-sm">
+            {marker.value}
+            {marker.unit ? ` ${marker.unit}` : ""}
+          </span>{" "}
+          <span className="text-[var(--color-text-faint)]">· {formatFull(marker.panel_date)}</span>
         </span>
-        <span>
+        <span className="text-[var(--color-text-faint)]">
           {marker.ref_low != null && marker.ref_high != null
             ? `Range ${marker.ref_low}–${marker.ref_high}${marker.unit ? ` ${marker.unit}` : ""}`
             : marker.ref_high != null
