@@ -4,7 +4,6 @@ Schedule (Eastern Time):
   06:00 — Healthcheck
   07:00 — Oura daily pull
   07:05 — Whoop daily pull
-  07:10 — Garmin daily pull
   07:30 — Daily briefing
   09:00 Sunday — Weekly deep-dive
 """

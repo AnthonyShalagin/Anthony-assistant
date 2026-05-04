@@ -50,8 +50,6 @@ OURA_TOKEN = os.environ.get("OURA_TOKEN", "")
 WHOOP_CLIENT_ID = os.environ.get("WHOOP_CLIENT_ID", "")
 WHOOP_CLIENT_SECRET = os.environ.get("WHOOP_CLIENT_SECRET", "")
 WHOOP_REDIRECT_URI = os.environ.get("WHOOP_REDIRECT_URI", "https://localhost/callback")
-GARMIN_CONSUMER_KEY = os.environ.get("GARMIN_CONSUMER_KEY", "")
-GARMIN_CONSUMER_SECRET = os.environ.get("GARMIN_CONSUMER_SECRET", "")
 
 # genesis-bot
 GENESIS_API_URL = os.environ.get("GENESIS_API_URL", "https://genesis-sms.vercel.app")

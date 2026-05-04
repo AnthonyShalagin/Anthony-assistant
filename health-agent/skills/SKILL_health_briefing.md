@@ -5,8 +5,10 @@
 - **Weekly deep-dive**: Sundays at 09:00 AM Eastern
 
 ## Description
-Generate an LLM-powered health briefing based on aggregated data from all sources
-(Oura, Whoop, Garmin, Strong workouts). Delivers a formatted message via Telegram.
+Generate an LLM-powered health briefing based on aggregated data from Oura
+and Whoop. Delivers a formatted message via Telegram. Strong workouts and
+Garmin data are NOT used for analysis — both have inconsistent sync
+patterns and would lead the agent to draw bad conclusions from gaps.
 
 ## How It Works
 1. Query 7-day and 30-day averages for all tracked metrics
@@ -32,4 +34,3 @@ Generate an LLM-powered health briefing based on aggregated data from all source
 |--------|---------|
 | Oura   | Sleep Score, Readiness, Activity, HRV |
 | Whoop  | Recovery, Strain, HRV (RMSSD), Sleep Performance |
-| Garmin | Steps, Body Battery, Stress |

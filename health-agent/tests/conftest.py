@@ -43,11 +43,6 @@ def populated_db(tmp_db):
             upsert_metric(conn, dt, "whoop", "hrv_rmssd", 45 + i % 15, "ms")
             upsert_metric(conn, dt, "whoop", "sleep_performance", 70 + i % 15, "%")
 
-            # Garmin metrics
-            upsert_metric(conn, dt, "garmin", "steps", 6000 + i * 500, "steps")
-            upsert_metric(conn, dt, "garmin", "body_battery_high", 60 + i % 30, "level")
-            upsert_metric(conn, dt, "garmin", "avg_stress", 25 + i % 10, "level")
-
         # Add sample workouts
         for day_offset in [0, 2, 4]:
             dt = (today - timedelta(days=day_offset)).isoformat()

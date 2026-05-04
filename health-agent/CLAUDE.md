@@ -4,7 +4,7 @@
 
 Personal health intelligence agent built on Hermes Agent (by Nous Research) that:
 
-- Pulls daily data from Oura Ring, Whoop, and Garmin APIs
+- Pulls daily data from Oura Ring and Whoop APIs
 - Accepts Strong app CSV uploads via Telegram
 - Stores everything in SQLite
 - Delivers daily/weekly health briefings via Telegram using LLM analysis
@@ -24,6 +24,11 @@ GitHub base: <https://github.com/NousResearch/hermes-agent>
   Telegram-facing analysis tooling must follow this rule.
 - Strong CSV uploads are still ingested for the dashboard / portfolio history
   — just don't surface them in Telegram analysis.
+- **Garmin is removed from automated ingestion** (no Garmin client, no schedule
+  entry, no env vars) and any Garmin signals are out of scope for analysis.
+  The user syncs Garmin sporadically, so the data isn't reliable as a daily
+  signal. Same rule as Strong: even if Garmin data ever appears in the DB,
+  prompts must not draw judgments from it.
 
 ## What's Built (All Phases Complete)
 
@@ -41,8 +46,7 @@ health-agent/
 ├── telegram_bot.py           # Long-polling bot for messages + CSV uploads
 ├── clients/
 │   ├── oura.py               # Oura Ring API (bearer token)
-│   ├── whoop.py              # Whoop API (OAuth2 + auto-refresh)
-│   └── garmin.py             # Garmin Connect API (OAuth 1.0a)
+│   └── whoop.py              # Whoop API (OAuth2 + auto-refresh)
 ├── parsers/
 │   └── strong.py             # Strong app CSV parser (Epley 1RM)
 ├── briefing/
@@ -51,7 +55,6 @@ health-agent/
 ├── skills/                   # Hermes Agent SKILL.md definitions
 │   ├── SKILL_oura_pull.md
 │   ├── SKILL_whoop_pull.md
-│   ├── SKILL_garmin_pull.md
 │   ├── SKILL_strong_parser.md
 │   └── SKILL_health_briefing.md
 ├── tests/                    # 73 tests across all modules
@@ -69,7 +72,7 @@ health-agent/
 | Column      | Type    | Notes                                    |
 |-------------|---------|------------------------------------------|
 | date        | TEXT    | ISO format (YYYY-MM-DD)                  |
-| source      | TEXT    | "oura", "whoop", "garmin"                |
+| source      | TEXT    | "oura", "whoop"                          |
 | metric_name | TEXT    | e.g. "sleep_score", "hrv_rmssd"          |
 | value       | REAL    | Nullable for missing data                |
 | unit        | TEXT    | "score", "ms", "bpm", "%", etc.          |
@@ -94,12 +97,12 @@ health-agent/
 ### oauth_tokens
 | Column        | Type | Notes                                   |
 |---------------|------|-----------------------------------------|
-| provider      | TEXT | "whoop" or "garmin" (UNIQUE)            |
+| provider      | TEXT | "whoop" (UNIQUE)                        |
 | access_token  | TEXT |                                          |
 | refresh_token | TEXT | Preserved on upsert if new value is NULL |
 | token_type    | TEXT | Default "Bearer"                        |
 | expires_at    | TEXT | ISO timestamp                           |
-| extra         | TEXT | JSON blob (Garmin: resource_owner_secret)|
+| extra         | TEXT | JSON blob (provider-specific extras)    |
 
 ---
 
@@ -118,12 +121,6 @@ health-agent/
 - **Metrics**: recovery_score, resting_heart_rate, hrv_rmssd, spo2, skin_temp, strain_score, kilojoules, avg_heart_rate, sleep_performance, sleep_consistency, sleep_efficiency
 - **Token refresh**: Automatic via `requests-oauthlib` token_updater callback
 
-### Garmin Connect
-- **Auth**: OAuth 1.0a
-- **Base URL**: `https://apis.garmin.com/wellness-api/rest`
-- **Endpoints**: `dailies`, `bodyBattery`, `stressDetails`
-- **Metrics**: steps, active_calories, total_calories, distance, moderate/vigorous_intensity_minutes, body_battery_high/low, avg_stress, max_stress
-
 ### Strong App
 - **Input**: CSV file uploaded via Telegram
 - **Expected columns**: Date, Workout Name, Exercise Name, Set Order, Weight, Reps
@@ -138,7 +135,6 @@ health-agent/
 | 06:00 daily   | Healthcheck      | DB + API token verification       |
 | 07:00 daily   | Oura Pull        | Sleep, readiness, activity, HRV   |
 | 07:05 daily   | Whoop Pull       | Recovery, strain, sleep            |
-| 07:10 daily   | Garmin Pull      | Steps, body battery, stress       |
 | 07:30 daily   | Daily Briefing   | LLM analysis + Telegram delivery  |
 | 09:00 Sunday  | Weekly Briefing  | 7-day deep-dive with trends       |
 
@@ -179,8 +175,6 @@ Image: `python:3.11-slim`, runs as non-root user `agent`.
 | OURA_TOKEN            | Yes      | Oura personal access token           |
 | WHOOP_CLIENT_ID       | Yes      | Whoop OAuth2 client ID               |
 | WHOOP_CLIENT_SECRET   | Yes      | Whoop OAuth2 client secret           |
-| GARMIN_CONSUMER_KEY   | Yes      | Garmin OAuth 1.0a consumer key       |
-| GARMIN_CONSUMER_SECRET| Yes      | Garmin OAuth 1.0a consumer secret    |
 | OPENROUTER_API_KEY    | Yes      | OpenRouter API key for LLM           |
 | LLM_MODEL             | No       | Default: anthropic/claude-sonnet-4-6 |
 | DB_PATH               | No       | Default: health-agent/data/health.db |
@@ -201,7 +195,6 @@ Image: `python:3.11-slim`, runs as non-root user `agent`.
 | test_scheduler.py     | 7     | Cron matching, day-of-week, double-run     |
 | test_oura.py          | 4     | Pull daily, error handling, token verify   |
 | test_whoop.py         | 2     | Pull daily with mock OAuth, no-token case  |
-| test_garmin.py        | 4     | Epoch conversion, pull daily, no-token     |
 | test_healthcheck.py   | 4     | DB check, full healthcheck, partial fail   |
 
 Run tests: `cd health-agent && python -m pytest tests/ -v`

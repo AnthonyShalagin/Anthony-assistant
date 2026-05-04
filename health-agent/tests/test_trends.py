@@ -71,7 +71,7 @@ def test_format_trends_block_populated(populated_db):
     """format_trends_block produces readable output."""
     trends = get_all_trends(populated_db)
     block = format_trends_block(trends)
-    assert "Oura" in block or "Whoop" in block or "Garmin" in block
+    assert "Oura" in block or "Whoop" in block
 
 
 def test_format_trends_block_empty(tmp_db):

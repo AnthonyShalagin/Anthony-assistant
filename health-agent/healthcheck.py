@@ -57,13 +57,6 @@ def check_whoop_token(db_path: Optional[str] = None) -> tuple[bool, str]:
     return ok, "OK" if ok else "Token invalid — may need re-authorization"
 
 
-def check_garmin_token(db_path: Optional[str] = None) -> tuple[bool, str]:
-    """Verify Garmin OAuth token is valid."""
-    from clients.garmin import verify_token
-    ok = verify_token(db_path)
-    return ok, "OK" if ok else "Token invalid — may need re-authorization"
-
-
 def run_healthcheck(db_path: Optional[str] = None, notify: bool = True) -> dict:
     """Run all health checks and optionally notify via Telegram.
 

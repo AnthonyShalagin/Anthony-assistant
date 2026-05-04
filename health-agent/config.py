@@ -26,10 +26,6 @@ WHOOP_CLIENT_ID = os.environ.get("WHOOP_CLIENT_ID", "")
 WHOOP_CLIENT_SECRET = os.environ.get("WHOOP_CLIENT_SECRET", "")
 WHOOP_REDIRECT_URI = os.environ.get("WHOOP_REDIRECT_URI", "https://localhost/callback")
 
-# Garmin — OAuth 1.0a
-GARMIN_CONSUMER_KEY = os.environ.get("GARMIN_CONSUMER_KEY", "")
-GARMIN_CONSUMER_SECRET = os.environ.get("GARMIN_CONSUMER_SECRET", "")
-
 # LLM via OpenRouter
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "anthropic/claude-sonnet-4-6")
@@ -39,7 +35,6 @@ SCHEDULE = {
     "healthcheck": "09:00",
     "oura_pull": "09:30",
     "whoop_pull": "09:35",
-    "garmin_pull": "09:40",
     "daily_briefing": "10:00",
     "weekly_briefing": "10:30",  # Sundays only
 }
