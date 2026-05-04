@@ -7,10 +7,16 @@ import type { StrongSet } from "@/lib/mock";
 import { format, parseISO, startOfWeek } from "date-fns";
 
 export function StrengthClient({ sets }: { sets: StrongSet[] }) {
-  const exercises = useMemo(
-    () => Array.from(new Set(sets.map((s) => s.exercise))).sort(),
-    [sets]
-  );
+  // Sort exercises by frequency (most-done first), tie-break by name
+  const exercises = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sets) {
+      counts.set(s.exercise, (counts.get(s.exercise) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name]) => name);
+  }, [sets]);
   const [exercise, setExercise] = useState(exercises[0] ?? "Back Squat");
 
   // 1) Per-exercise weight over time (top set per workout)
