@@ -256,8 +256,8 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
                     onHoverEnter={(rect) => {
                       setHoveredMarker(m.marker);
                       // Estimated popover dimensions
-                      const POP_W = 440;
-                      const POP_H = 280;
+                      const POP_W = 540;
+                      const POP_H = 340;
                       const GAP = 12;
                       const PAD = 8;
                       // Prefer right of row; fall back to left if no space
@@ -462,28 +462,28 @@ function HoverPopover({
 
   return (
     <div
-      className="pointer-events-none fixed z-50 w-[440px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5 shadow-2xl"
+      className="pointer-events-none fixed z-50 w-[540px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 shadow-2xl"
       style={{ top, left }}
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-sm font-semibold text-[var(--color-text)]">{display}</span>
+        <span className="text-base font-semibold text-[var(--color-text)]">{display}</span>
         <span
-          className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wider"
+          className="rounded px-2 py-0.5 text-[11px] font-medium tracking-wider"
           style={{ background: `${color}22`, color }}
         >
           {marker.status.toUpperCase()}
         </span>
       </div>
       {def?.description && (
-        <p className="mt-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
+        <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-dim)]">
           {def.description}
         </p>
       )}
 
-      <div className="mt-4 grid grid-cols-[auto_1fr] gap-4 items-center">
+      <div className="mt-5 grid grid-cols-[auto_1fr] gap-5 items-center">
         <ZoneBars marker={marker} />
         <div className="-ml-2">
-          <ResponsiveContainer width="100%" height={140}>
+          <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={history} margin={{ top: 28, right: 16, left: 8, bottom: 4 }}>
               <defs>
                 <linearGradient id={`pop-${marker.marker.replace(/\W/g, "")}`} x1="0" y1="0" x2="0" y2="1">
@@ -494,12 +494,13 @@ function HoverPopover({
               <XAxis
                 dataKey="date"
                 stroke="#a1a1a1"
-                fontSize={11}
+                fontSize={12}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={formatShort}
                 interval={0}
-                padding={{ left: 24, right: 24 }}
+                padding={{ left: 28, right: 28 }}
+                tickMargin={6}
               />
               <YAxis hide domain={getDomain(marker, history)} />
               {marker.ref_low != null && (
@@ -590,18 +591,18 @@ function ZoneBars({ marker }: { marker: Marker }) {
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2.5">
       {zones.map((z) => (
-        <div key={z.key} className="flex items-center gap-2">
+        <div key={z.key} className="flex items-center gap-2.5">
           <div
-            className="h-6 w-1.5 rounded"
+            className="h-8 w-1.5 rounded"
             style={{
               background: z.color,
               opacity: isCurrent(z.key) ? 1 : 0.25,
             }}
           />
           <span
-            className="text-[10px]"
+            className="text-xs"
             style={{
               color: isCurrent(z.key) ? z.color : "var(--color-text-faint)",
               fontWeight: isCurrent(z.key) ? 600 : 400,
