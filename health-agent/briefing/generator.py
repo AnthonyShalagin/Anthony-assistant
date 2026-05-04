@@ -6,7 +6,6 @@ a formatted briefing for Telegram delivery.
 
 import json
 import logging
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -14,20 +13,20 @@ import requests
 
 from briefing.trends import get_all_trends, format_trends_block, MetricTrend
 from config import LLM_MODEL, OPENROUTER_API_KEY
-from database import get_db, get_recent_workouts, get_metrics, get_metric_average
+from database import get_db, get_metrics, get_metric_average
 
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-DAILY_SYSTEM_PROMPT = """You are a world-class functional medicine practitioner and health coach. You have access to this person's wearable data and workout history. They can already see their scores in their apps — never restate them.
+DAILY_SYSTEM_PROMPT = """You are a world-class functional medicine practitioner and health coach. You have access to this person's wearable data (Oura + Whoop). They can already see their scores in their apps — never restate them.
+
+IMPORTANT: Do NOT comment on workout volume, training frequency, or whether they "skipped" training. The user does not log every workout in Strong, so workout-log absence is meaningless. Whoop strain captures all real training load automatically — use that as the signal of training stress, never a strength-training log.
 
 Your job is to catch what they'd MISS:
-- HRV-to-training-load mismatches (nervous system not recovering despite "good" sleep scores)
-- Patterns across days (e.g. HRV consistently drops after back-to-back training days)
+- HRV-to-strain mismatches (nervous system not recovering despite "good" sleep scores)
+- Patterns across days (e.g. HRV consistently drops after back-to-back high-strain days)
 - Signs of accumulated fatigue vs acute fatigue
-- Muscle group imbalances or neglected movement patterns
-- Strength plateaus or regressions that signal programming issues
 - Recovery quality vs recovery quantity (high sleep score but low HRV = poor parasympathetic recovery)
 - Overreaching signals before they become overtraining
 
@@ -42,13 +41,13 @@ Rules:
 
 WEEKLY_SYSTEM_PROMPT = """You are a world-class functional medicine practitioner doing a weekly review. The user sees their daily scores already — never restate them.
 
+IMPORTANT: Do NOT comment on workout volume, "missed" training days, or strength-training programming. The user doesn't log every workout in Strong. Whoop strain captures actual training load automatically — anchor your analysis on Whoop strain + Oura activity, never on a strength log.
+
 Find the patterns that only emerge across a full week:
 - Nervous system recovery trajectory (is HRV trending up, flat, or declining over the week?)
-- Training load vs recovery capacity mismatch
+- Cumulative strain vs recovery capacity mismatch
 - Sleep debt accumulation (subtle declines across multiple nights)
-- Muscle group balance and movement pattern gaps
-- Volume progression or regression vs prior weeks
-- Whether their training frequency matches their recovery capacity
+- Whether their average daily strain matches their average recovery
 
 Rules:
 - 4-6 sentences MAX. Lead with the most important finding.
@@ -75,77 +74,10 @@ def _build_context(trends: list[MetricTrend], weekly: bool = False, db_path: Opt
             parts.append(f"  {t.metric_name} ({t.source}): 7d={t.avg_7d:.1f}, 30d={val_30d} {t.arrow}")
     parts.append("")
 
-    # Workout analysis — much richer context
-    with get_db(**db_kwargs) as conn:
-        lookback = 30 if weekly else 14
-        workouts = get_recent_workouts(conn, days=lookback)
-
-    if workouts:
-        parts.append("=== WORKOUT ANALYSIS ===")
-
-        # Group by date and workout
-        by_workout = defaultdict(list)
-        for w in workouts:
-            by_workout[(w["date"], w["workout_name"])].append(w)
-
-        # Training frequency
-        workout_dates = sorted(set(w["date"] for w in workouts))
-        parts.append(f"Training frequency: {len(workout_dates)} sessions in last {lookback} days")
-
-        # Days since last workout
-        if workout_dates:
-            last_workout = date.fromisoformat(workout_dates[-1])
-            days_rest = (today - last_workout).days
-            parts.append(f"Days since last workout: {days_rest}")
-
-        # Muscle group / exercise frequency
-        exercise_counts = defaultdict(int)
-        exercise_max_weight = defaultdict(float)
-        exercise_max_1rm = defaultdict(float)
-        weekly_volume = defaultdict(float)
-
-        for (dt, name), sets in by_workout.items():
-            week_key = date.fromisoformat(dt).isocalendar()[1]
-            for s in sets:
-                ex = s["exercise"]
-                exercise_counts[ex] += 1
-                if s["weight"] and s["weight"] > exercise_max_weight[ex]:
-                    exercise_max_weight[ex] = s["weight"]
-                if s["estimated_1rm"] and s["estimated_1rm"] > exercise_max_1rm[ex]:
-                    exercise_max_1rm[ex] = s["estimated_1rm"]
-                if s["volume"]:
-                    weekly_volume[week_key] += s["volume"]
-
-        # Top exercises by frequency
-        top_exercises = sorted(exercise_counts.items(), key=lambda x: -x[1])[:10]
-        parts.append(f"Top exercises (last {lookback}d): " +
-                    ", ".join(f"{ex}({c} sets)" for ex, c in top_exercises))
-
-        # Volume trend by week
-        if len(weekly_volume) > 1:
-            sorted_weeks = sorted(weekly_volume.items())
-            parts.append("Weekly total volume trend: " +
-                        " → ".join(f"wk{w}:{v:.0f}" for w, v in sorted_weeks[-4:]))
-
-        # Best estimated 1RMs for key lifts
-        key_lifts = ["Bench Press (Barbell)", "Squat (Barbell)", "Deadlift (Barbell)",
-                     "Bench Press (Dumbbell)", "Incline Bench Press (Barbell)",
-                     "Squat (Smith Machine)", "Leg Press"]
-        prs = {ex: exercise_max_1rm[ex] for ex in key_lifts if exercise_max_1rm.get(ex)}
-        if prs:
-            parts.append("Best est. 1RMs (last {0}d): ".format(lookback) +
-                        ", ".join(f"{ex}: {v:.0f}lb" for ex, v in prs.items()))
-
-        # Recent sessions detail (last 3)
-        recent_sessions = sorted(by_workout.items(), key=lambda x: x[0])[-3:]
-        parts.append("")
-        parts.append("=== LAST 3 SESSIONS ===")
-        for (dt, name), sets in recent_sessions:
-            exercises = set(s["exercise"] for s in sets)
-            total_vol = sum(s["volume"] for s in sets if s["volume"])
-            parts.append(f"  {dt} — {name}: {', '.join(sorted(exercises))} | vol: {total_vol:.0f}")
-    else:
-        parts.append("No workouts in the last {0} days.".format(lookback))
+    # NOTE: Strong workout history intentionally excluded from analysis.
+    # The user does not log every session in Strong, so workout-log gaps
+    # are not a real signal of training absence. Whoop strain captures
+    # actual training load automatically — that's what the prompts use.
 
     return "\n".join(parts)
 

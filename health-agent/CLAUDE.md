@@ -14,6 +14,17 @@ GitHub base: <https://github.com/NousResearch/hermes-agent>
 
 ---
 
+## User Preferences (IMPORTANT)
+
+- **Telegram briefings must NOT analyze Strong workout logs.** The user does
+  not log every workout in the Strong app, so a gap in the log is not a real
+  signal of skipped training. Anchor analysis on **Whoop strain** + **Oura
+  activity** instead — Whoop strain captures actual training load
+  automatically. Briefing prompts (`briefing/generator.py`) and any future
+  Telegram-facing analysis tooling must follow this rule.
+- Strong CSV uploads are still ingested for the dashboard / portfolio history
+  — just don't surface them in Telegram analysis.
+
 ## What's Built (All Phases Complete)
 
 73 tests passing. All code lives in `health-agent/`.
