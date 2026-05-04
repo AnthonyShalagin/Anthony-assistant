@@ -29,6 +29,20 @@ const tooltipStyle = {
   color: "#f5f5f5",
 };
 
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-04-23" -> "Apr 23, 2026" */
+function formatLiftDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
+}
+
+/** "2026-04-23" -> "Apr 23" — for tight chart axes */
+function formatChartTick(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`;
+}
+
 const PRIORITY_COLORS = [
   "var(--color-recovery)",
   "var(--color-strain)",
@@ -189,7 +203,7 @@ export function StrengthClient({ sets }: { sets: StrongSet[] }) {
       </Card>
 
       {/* ============= PER-EXERCISE PROGRESS ============= */}
-      <Card title="Per-Exercise Progress" hint="Top set per workout">
+      <Card title="Per-Exercise Progress" hint="Estimated 1RM trend">
         <div className="mb-4 flex flex-wrap gap-1">
           {orderedExercises.map((e) => (
             <button
@@ -206,37 +220,48 @@ export function StrengthClient({ sets }: { sets: StrongSet[] }) {
           ))}
         </div>
         {exerciseProgress.length > 0 ? (
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={280}>
             <LineChart
               data={exerciseProgress}
-              margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+              margin={{ top: 16, right: 16, left: -8, bottom: 4 }}
             >
               <CartesianGrid stroke={GRID} vertical={false} />
               <XAxis
                 dataKey="date"
                 stroke={AXIS}
-                fontSize={10}
+                fontSize={11}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(v: string) => v.slice(2, 7)}
-                minTickGap={24}
+                tickFormatter={formatChartTick}
+                minTickGap={32}
+                tickMargin={6}
               />
-              <YAxis stroke={AXIS} fontSize={10} tickLine={false} axisLine={false} width={36} />
-              <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: GRID }} />
-              <Line
-                type="monotone"
-                dataKey="top_weight"
-                name="Top weight"
-                stroke="var(--color-strain)"
-                strokeWidth={2}
-                dot={{ r: 2 }}
+              <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={40} />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                cursor={{ stroke: GRID }}
+                labelFormatter={(v) => (typeof v === "string" ? formatLiftDate(v) : "")}
+                formatter={(value, key) => [
+                  `${Math.round(Number(value))} lbs`,
+                  key === "top_e1rm" ? "Est. 1RM" : "Top set",
+                ] as [string, string]}
               />
+              <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1a1" }} iconType="line" />
               <Line
                 type="monotone"
                 dataKey="top_e1rm"
-                name="e1RM"
+                name="Est. 1RM"
                 stroke="var(--color-recovery)"
-                strokeWidth={2}
+                strokeWidth={2.5}
+                dot={{ r: 3, fill: "var(--color-recovery)" }}
+                activeDot={{ r: 5 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="top_weight"
+                name="Top set"
+                stroke="var(--color-strain)"
+                strokeWidth={1.5}
                 strokeDasharray="3 3"
                 dot={false}
               />
@@ -307,15 +332,15 @@ function PriorityLiftCard({
       </div>
       <div className="mt-3 flex items-baseline gap-2">
         <span className="metric-num text-3xl font-semibold" style={{ color }}>
-          {Math.round(latest.top_weight)}
+          {Math.round(latest.top_e1rm)}
         </span>
         <span className="text-xs text-[var(--color-text-faint)]">
-          lbs · top set
+          lbs · est. 1RM
         </span>
       </div>
       <div className="mt-1 flex items-center gap-2 text-xs">
         <span className="text-[var(--color-text-dim)]">
-          e1RM <span className="metric-num text-[var(--color-text)]">{Math.round(latest.top_e1rm)}</span>
+          top set <span className="metric-num text-[var(--color-text)]">{Math.round(latest.top_weight)}</span>
         </span>
         {history.length >= 2 && (
           <span
@@ -327,11 +352,14 @@ function PriorityLiftCard({
                 : "text-[var(--color-text-faint)]"
             }
           >
-            {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} {Math.abs(deltaPct).toFixed(1)}%
+            {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} {Math.abs(deltaPct).toFixed(1)}% (90d)
           </span>
         )}
-        <span className="text-[var(--color-text-faint)]">
-          · {daysSince === 0 ? "today" : `${daysSince}d ago`}
+      </div>
+      <div className="mt-1 text-[11px] text-[var(--color-text-faint)] tabular-nums">
+        Last lift: {formatLiftDate(latest.date)}{" "}
+        <span className="text-[var(--color-text-dim)]">
+          ({daysSince === 0 ? "today" : daysSince === 1 ? "yesterday" : `${daysSince} days ago`})
         </span>
       </div>
 
@@ -382,20 +410,26 @@ function E1RMChart({
   lifts: string[];
 }) {
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      <LineChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data} margin={{ top: 16, right: 16, left: -8, bottom: 4 }}>
         <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis
           dataKey="date"
           stroke={AXIS}
-          fontSize={10}
+          fontSize={11}
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v: string) => v.slice(2, 7)}
-          minTickGap={24}
+          tickFormatter={formatChartTick}
+          minTickGap={32}
+          tickMargin={6}
         />
-        <YAxis stroke={AXIS} fontSize={10} tickLine={false} axisLine={false} width={36} />
-        <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: GRID }} />
+        <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={40} />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          cursor={{ stroke: GRID }}
+          labelFormatter={(v) => (typeof v === "string" ? formatLiftDate(v) : "")}
+          formatter={(value) => [`${Math.round(Number(value))} lbs`, "Est. 1RM"] as [string, string]}
+        />
         <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1a1" }} iconType="line" />
         {lifts.map((lift, i) => (
           <Line
@@ -433,7 +467,7 @@ function VolumeChart({ data }: { data: Record<string, number | string>[] }) {
           fontSize={10}
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v: string) => v.slice(2, 7)}
+          tickFormatter={formatChartTick}
         />
         <YAxis stroke={AXIS} fontSize={10} tickLine={false} axisLine={false} width={48} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#1c1c1c" }} />
