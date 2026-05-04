@@ -237,9 +237,21 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
                     isLast={idx === list.length - 1}
                     onHoverEnter={(rect) => {
                       setHoveredMarker(m.marker);
-                      // Position popover next to the row, on the right side if there's space
-                      const top = rect.top + window.scrollY + rect.height / 2 - 100;
-                      const left = Math.min(rect.right + 12, window.innerWidth - 460);
+                      // Estimated popover dimensions
+                      const POP_W = 440;
+                      const POP_H = 280;
+                      const GAP = 12;
+                      const PAD = 8;
+                      // Prefer right of row; fall back to left if no space
+                      let left = rect.right + GAP;
+                      if (left + POP_W + PAD > window.innerWidth) {
+                        left = rect.left - POP_W - GAP;
+                      }
+                      // If there's still no horizontal room either side, pin to right edge
+                      if (left < PAD) left = window.innerWidth - POP_W - PAD;
+                      // Vertically center on the row, then clamp inside viewport
+                      let top = rect.top + rect.height / 2 - POP_H / 2;
+                      top = Math.max(PAD, Math.min(top, window.innerHeight - POP_H - PAD));
                       setHoverPos({ top, left });
                     }}
                     onHoverLeave={() => {
