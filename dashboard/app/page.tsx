@@ -16,9 +16,23 @@ export default async function TodayPage() {
   const yesterday = days[days.length - 2];
   const latestInBody = inbody[inbody.length - 1];
 
-  const delta = (a: number, b: number, unit = "") => {
-    const d = a - b;
-    return { value: `${d >= 0 ? "+" : ""}${d.toFixed(unit === "%" ? 1 : 0)}${unit}`, positive: d >= 0 };
+  // Coalesce missing/nullable real-world data
+  const num = (v: number | null | undefined): number | null =>
+    v == null || isNaN(Number(v)) ? null : Number(v);
+  const fmt = (v: number | null | undefined, digits = 1) =>
+    v == null ? "—" : Number(v).toFixed(digits);
+  const fmtInt = (v: number | null | undefined) =>
+    v == null ? "—" : Number(v).toLocaleString();
+
+  const delta = (a: number | null | undefined, b: number | null | undefined, unit = "") => {
+    const an = num(a);
+    const bn = num(b);
+    if (an == null || bn == null) return undefined;
+    const d = an - bn;
+    return {
+      value: `${d >= 0 ? "+" : ""}${d.toFixed(unit === "%" || unit === "h" ? 1 : 0)}${unit}`,
+      positive: d >= 0,
+    };
   };
 
   const last7 = days.slice(-7);
@@ -28,13 +42,13 @@ export default async function TodayPage() {
       {/* Hero: Recovery + summary */}
       <section className="grid gap-6 lg:grid-cols-[auto_1fr]">
         <Card className="flex flex-col items-center justify-center bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-surface-2)]">
-          <RecoveryRing value={today.recovery_score} />
+          <RecoveryRing value={num(today.recovery_score) ?? 0} />
           <div className="mt-4 text-center">
             <div className="text-xs uppercase tracking-[0.25em] text-[var(--color-text-faint)]">
               Strain
             </div>
             <div className="metric-num mt-1 text-2xl font-semibold text-[var(--color-strain)]">
-              {today.strain.toFixed(1)}
+              {fmt(today.strain)}
             </div>
           </div>
         </Card>
@@ -42,46 +56,46 @@ export default async function TodayPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MetricCard
             label="HRV"
-            value={today.hrv}
+            value={fmt(today.hrv, 0)}
             unit="ms"
             accent="recovery"
-            delta={delta(today.hrv, yesterday.hrv, "ms")}
+            delta={delta(today.hrv, yesterday?.hrv, "ms")}
             hint="vs yesterday"
           />
           <MetricCard
             label="Resting HR"
-            value={today.rhr}
+            value={fmt(today.rhr, 0)}
             unit="bpm"
             accent="alert"
-            delta={delta(today.rhr, yesterday.rhr, "bpm")}
+            delta={delta(today.rhr, yesterday?.rhr, "bpm")}
             hint="vs yesterday"
           />
           <MetricCard
             label="Sleep"
-            value={today.sleep_hours.toFixed(1)}
+            value={fmt(today.sleep_hours)}
             unit="hr"
             accent="sleep"
-            delta={delta(today.sleep_hours, yesterday.sleep_hours, "h")}
-            hint={`score ${today.sleep_score}`}
+            delta={delta(today.sleep_hours, yesterday?.sleep_hours, "h")}
+            hint={today.sleep_score != null ? `score ${today.sleep_score}` : undefined}
           />
           <MetricCard
             label="Steps"
-            value={today.steps.toLocaleString()}
-            delta={delta(today.steps, yesterday.steps)}
+            value={fmtInt(today.steps)}
+            delta={delta(today.steps, yesterday?.steps)}
             hint="vs yesterday"
           />
           <MetricCard
             label="Weight"
-            value={latestInBody.weight_lbs.toFixed(1)}
+            value={fmt(latestInBody.weight_lbs)}
             unit="lbs"
             hint={`scan ${latestInBody.date.slice(5)}`}
           />
           <MetricCard
             label="Body Fat"
-            value={latestInBody.bf_pct.toFixed(1)}
+            value={fmt(latestInBody.bf_pct)}
             unit="%"
             accent="warn"
-            hint={`SMM ${latestInBody.skeletal_muscle_lbs.toFixed(1)} lbs`}
+            hint={`SMM ${fmt(latestInBody.skeletal_muscle_lbs)} lbs`}
           />
         </div>
       </section>
