@@ -14,6 +14,10 @@ const TABS = [
 
 export function Nav() {
   const pathname = usePathname();
+  // Hide nav on auth pages
+  if (pathname === "/login" || pathname === "/403" || pathname?.startsWith("/auth/")) {
+    return null;
+  }
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/85 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
@@ -42,8 +46,19 @@ export function Nav() {
             );
           })}
         </nav>
-        <div className="text-xs text-[var(--color-text-faint)] tabular-nums">
-          {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-[var(--color-text-faint)] tabular-nums">
+            {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+          </span>
+          <form action="/auth/signout" method="post">
+            <button
+              type="submit"
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[var(--color-text-dim)] transition-colors hover:text-[var(--color-text)]"
+              title="Sign out"
+            >
+              Sign out
+            </button>
+          </form>
         </div>
       </div>
     </header>
