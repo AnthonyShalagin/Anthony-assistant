@@ -84,6 +84,27 @@ export async function fetchStrongSets(weeks: number): Promise<StrongSet[]> {
   }
 }
 
+/** Latest single workout (for the "Last lift" chip on Today). */
+export async function fetchLastWorkout(): Promise<{
+  date: string;
+  exercise: string;
+  workout_name: string | null;
+} | null> {
+  if (!configured()) return null;
+  try {
+    const sb = admin();
+    const { data, error } = await sb
+      .from("workouts_strong")
+      .select("date,exercise,workout_name")
+      .order("date", { ascending: false })
+      .limit(1);
+    if (error || !data || data.length === 0) return null;
+    return data[0] as { date: string; exercise: string; workout_name: string | null };
+  } catch {
+    return null;
+  }
+}
+
 export type BloodPanel = {
   panel_date: string;
   lab_name: string | null;
