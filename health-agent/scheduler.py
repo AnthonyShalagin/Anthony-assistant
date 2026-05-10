@@ -128,6 +128,10 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
     # 09:35 — Whoop pull
     s.add_job("Whoop Pull", 9, 35, lambda: whoop_pull(db_path=db_path))
 
+    # 09:40 — push fresh metrics + workouts to Supabase for the dashboard
+    from supabase_sync import sync as supabase_sync
+    s.add_job("Supabase Sync", 9, 40, lambda: supabase_sync(days=7, db_path=db_path))
+
     # 10:00 — Daily briefing
     def daily():
         result = generate_briefing(weekly=False, db_path=db_path)

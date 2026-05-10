@@ -30,6 +30,10 @@ WHOOP_REDIRECT_URI = os.environ.get("WHOOP_REDIRECT_URI", "https://localhost/cal
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "anthropic/claude-sonnet-4-6")
 
+# Supabase — daily push of metrics + workouts for the dashboard
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
 # Schedule (24-hour format, Eastern Time)
 SCHEDULE = {
     "healthcheck": "09:00",
