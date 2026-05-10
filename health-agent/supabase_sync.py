@@ -25,17 +25,22 @@ logger = logging.getLogger(__name__)
 
 
 # SQLite metric_name → daily_metrics column. Source-specific (preferred provider).
+#
+# Important: Oura stores `readiness_resting_heart_rate` as a 0-100 CONTRIBUTOR
+# SCORE (not BPM), so for true RHR we use Whoop. Same for sleep stage detail —
+# Oura's daily_sleep endpoint doesn't return total duration, so sleep_hours
+# falls back to whatever was already in the column.
 OURA_METRIC_MAP = {
-    "hrv_average": "hrv",
-    "readiness_resting_heart_rate": "rhr",
-    "sleep_score": "sleep_score",
-    "total_sleep_seconds": "sleep_hours",  # special-cased: divide by 3600
-    "steps": "steps",
+    "hrv_average": "hrv",                  # ms (Oura primary, more accurate)
+    "sleep_score": "sleep_score",          # 0-100
+    "total_sleep_duration": "sleep_hours", # seconds → /3600 (special-cased)
+    "steps": "steps",                      # int
 }
 
 WHOOP_METRIC_MAP = {
-    "recovery_score": "recovery_score",
-    "strain_score": "strain",
+    "recovery_score": "recovery_score",    # 0-100 (Whoop only)
+    "strain_score": "strain",              # 0-21 (Whoop only)
+    "resting_heart_rate": "rhr",           # bpm (Whoop only — Oura doesn't store real RHR)
 }
 
 
