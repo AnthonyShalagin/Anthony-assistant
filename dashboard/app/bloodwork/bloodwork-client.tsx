@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { getDef, canonicalStatus } from "@/lib/biomarker-info";
@@ -90,6 +90,24 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
   const [hoverPos, setHoverPos] = useState<{ top: number; left: number } | null>(null);
+  // Debounce close so the mouse can transit from the row to the popover
+  // without dismissing it. Cancelled when the popover (or another row) is
+  // entered before the timer fires.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => {
+      setHoveredMarker(null);
+      setHoverPos(null);
+      closeTimer.current = null;
+    }, 120);
+  };
 
   // Build per-marker history (using canonical statuses)
   const historyByMarker = useMemo(() => {
@@ -254,6 +272,7 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
                     history={historyByMarker.get(m.marker) ?? []}
                     isLast={idx === list.length - 1}
                     onHoverEnter={(rect) => {
+                      cancelClose();
                       setHoveredMarker(m.marker);
                       // Estimated popover dimensions
                       const POP_W = 540;
@@ -272,10 +291,7 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
                       top = Math.max(PAD, Math.min(top, window.innerHeight - POP_H - PAD));
                       setHoverPos({ top, left });
                     }}
-                    onHoverLeave={() => {
-                      setHoveredMarker(null);
-                      setHoverPos(null);
-                    }}
+                    onHoverLeave={scheduleClose}
                   />
                 ))}
               </div>
@@ -291,6 +307,8 @@ export function BloodworkClient({ markers }: { markers: Marker[] }) {
           history={hoveredHistory}
           top={hoverPos.top}
           left={hoverPos.left}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
         />
       )}
     </div>
@@ -450,11 +468,15 @@ function HoverPopover({
   history,
   top,
   left,
+  onMouseEnter,
+  onMouseLeave,
 }: {
   marker: Marker;
   history: HistoryPoint[];
   top: number;
   left: number;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
 }) {
   const def = getDef(marker.marker);
   const display = def?.display ?? marker.marker;
@@ -462,8 +484,10 @@ function HoverPopover({
 
   return (
     <div
-      className="pointer-events-none fixed z-50 w-[540px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 shadow-2xl"
+      className="fixed z-50 w-[540px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 shadow-2xl"
       style={{ top, left }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <div className="flex items-baseline gap-2">
         <span className="text-base font-semibold text-[var(--color-text)]">{display}</span>
@@ -509,38 +533,46 @@ function HoverPopover({
               {marker.ref_high != null && (
                 <ReferenceLine y={marker.ref_high} stroke="#3a3a3a" strokeDasharray="3 3" />
               )}
+              <Tooltip
+                cursor={{ stroke: "#3a3a3a", strokeDasharray: "2 4" }}
+                content={({ active, payload }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  const p = payload[0]?.payload as HistoryPoint | undefined;
+                  if (!p) return null;
+                  const c = STATUS_COLOR[p.status] ?? "#6b6b6b";
+                  return (
+                    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs shadow-lg">
+                      <div className="metric-num font-semibold" style={{ color: c }}>
+                        {p.value}
+                        {marker.unit ? ` ${marker.unit}` : ""}
+                      </div>
+                      <div className="text-[10px] text-[var(--color-text-faint)]">
+                        {formatFull(p.date)}
+                      </div>
+                    </div>
+                  );
+                }}
+              />
               <Area
                 type="monotone"
                 dataKey="value"
                 stroke={color}
                 strokeWidth={2}
                 fill={`url(#pop-${marker.marker.replace(/\W/g, "")})`}
+                activeDot={{ r: 5, stroke: "#0a0a0a", strokeWidth: 2 }}
                 dot={(props: { cx?: number; cy?: number; payload?: HistoryPoint; index?: number }) => {
                   const { cx = 0, cy = 0, payload, index } = props;
                   const c = STATUS_COLOR[payload?.status ?? "normal"] ?? "#6b6b6b";
-                  // Stagger value labels above/below to avoid overlap
-                  const labelY = (index ?? 0) % 2 === 0 ? cy - 10 : cy - 10;
                   return (
-                    <g key={`d-${index ?? cx}-${cy}`}>
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={4}
-                        fill={c}
-                        stroke="#0a0a0a"
-                        strokeWidth={2}
-                      />
-                      <text
-                        x={cx}
-                        y={labelY}
-                        textAnchor="middle"
-                        fontSize={11}
-                        fill={c}
-                        fontWeight={600}
-                      >
-                        {payload?.value}
-                      </text>
-                    </g>
+                    <circle
+                      key={`d-${index ?? cx}-${cy}`}
+                      cx={cx}
+                      cy={cy}
+                      r={4}
+                      fill={c}
+                      stroke="#0a0a0a"
+                      strokeWidth={2}
+                    />
                   );
                 }}
               />

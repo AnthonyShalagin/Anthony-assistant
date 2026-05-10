@@ -73,12 +73,19 @@ export async function fetchStrongSets(weeks: number): Promise<StrongSet[]> {
   if (!configured()) return mockStrong(weeks);
   try {
     const sb = admin();
+    // Supabase REST caps responses at 1000 rows; without a date filter we
+    // were getting the OLDEST 1000 sets. Bound by date and return desc.
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - weeks * 7);
+    const sinceStr = since.toISOString().slice(0, 10);
     const { data, error } = await sb
       .from("workouts_strong")
       .select("date,exercise,set_number,reps,weight_lbs,e1rm,muscle_group")
-      .order("date", { ascending: true });
+      .gte("date", sinceStr)
+      .order("date", { ascending: false })
+      .limit(5000);
     if (error || !data || data.length === 0) return mockStrong(weeks);
-    return data as StrongSet[];
+    return (data as StrongSet[]).slice().reverse();
   } catch {
     return mockStrong(weeks);
   }
