@@ -17,6 +17,17 @@ import {
 const AXIS_COLOR = "#6b6b6b";
 const GRID_COLOR = "#262626";
 
+/** Compact axis label formatter — "1234" -> "1.2k", "12000" -> "12k". */
+function fmtAxis(v: number): string {
+  if (v == null || isNaN(v)) return "";
+  const n = Number(v);
+  if (Math.abs(n) >= 1000) {
+    return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
+  }
+  // Drop unnecessary decimals
+  return Number.isInteger(n) ? n.toString() : n.toFixed(1);
+}
+
 const tooltipStyle = {
   background: "#141414",
   border: "1px solid #262626",
@@ -61,7 +72,7 @@ export function TrendArea({
           tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
           minTickGap={24}
         />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={30} />
+        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
         <Tooltip
           contentStyle={tooltipStyle}
           cursor={{ stroke: GRID_COLOR }}
@@ -107,7 +118,7 @@ export function TrendLine({
           tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
           minTickGap={24}
         />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={30} />
+        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
         <Tooltip
           contentStyle={tooltipStyle}
           cursor={{ stroke: GRID_COLOR }}
@@ -153,7 +164,7 @@ export function BarSeries({
           tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
           minTickGap={16}
         />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={30} />
+        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
         <Tooltip
           contentStyle={tooltipStyle}
           cursor={{ fill: "#1c1c1c" }}
@@ -189,7 +200,7 @@ export function StackedBars({
           tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
           minTickGap={16}
         />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={30} />
+        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#1c1c1c" }} />
         {keys.map((k) => (
           <Bar key={k.key} dataKey={k.key} stackId="a" fill={k.color} name={k.label} />
