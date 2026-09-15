@@ -1,11 +1,10 @@
-"""Cron-based scheduler for daily health data pulls and briefings.
+"""Cron-based scheduler for daily health data pulls.
 
 Schedule (Eastern Time):
-  06:00 — Healthcheck
-  07:00 — Oura daily pull
-  07:05 — Whoop daily pull
-  07:30 — Daily briefing
-  09:00 Sunday — Weekly deep-dive
+  09:00 — Healthcheck (silent)
+  09:30 — Oura daily pull (incl. workouts)
+  09:35 — Whoop daily pull
+  09:40 — Supabase sync for the dashboard
 """
 
 import logging
@@ -114,8 +113,6 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
     from healthcheck import run_healthcheck
     from clients.oura import pull_daily as oura_pull
     from clients.whoop import pull_daily as whoop_pull
-    from briefing.generator import generate_briefing
-    from telegram_bot import send_message
 
     s = Scheduler()
 
@@ -132,26 +129,10 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
     from supabase_sync import sync as supabase_sync
     s.add_job("Supabase Sync", 9, 40, lambda: supabase_sync(days=7, db_path=db_path))
 
-    # 10:00 — Daily briefing
-    def daily():
-        result = generate_briefing(weekly=False, db_path=db_path)
-        send_message(result["full_message"])
-
-    s.add_job("Daily Briefing", 10, 0, daily)
-
-    # 10:30 Sunday — Weekly deep-dive
-    def weekly():
-        result = generate_briefing(weekly=True, db_path=db_path)
-        send_message(result["full_message"])
-
-    s.add_job("Weekly Briefing", 10, 30, weekly, day_of_week=6)  # 6 = Sunday
-
-    # 1st of each month at 10:00 — Remind to upload Strong data
-    def strong_reminder():
-        from datetime import date
-        if date.today().day == 1:
-            send_message("📲 Monthly reminder: Export your latest workouts from Strong and send the CSV here to keep your training data current.")
-
-    s.add_job("Strong Reminder", 10, 0, strong_reminder)
+    # No scheduled Telegram messages. The daily briefing went unread, so health
+    # is now one section of the Sunday Life OS review on Anthony's Mac, which
+    # reads this DB through export_week.py. Strong workouts arrive through
+    # Apple Health -> Oura, so the monthly "export your CSV" reminder is gone.
+    # generate_briefing is still available on demand via Jarvis.
 
     return s

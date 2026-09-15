@@ -4,15 +4,19 @@ Fetches strain, recovery, HRV, and sleep performance.
 API docs: https://developer.whoop.com/api
 """
 
+import fcntl
 import json
 import logging
+import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import requests
 from requests_oauthlib import OAuth2Session
 
-from config import WHOOP_CLIENT_ID, WHOOP_CLIENT_SECRET, WHOOP_REDIRECT_URI
+from config import DB_PATH, WHOOP_CLIENT_ID, WHOOP_CLIENT_SECRET, WHOOP_REDIRECT_URI
 from database import get_db, load_oauth_token, save_oauth_token, upsert_metric
 
 logger = logging.getLogger(__name__)
@@ -20,6 +24,78 @@ logger = logging.getLogger(__name__)
 TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 BASE_URL = "https://api.prod.whoop.com/developer/v2"
 AUTHORIZE_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
+
+# Refresh a few minutes early so a pull never starts with a token that dies mid-run.
+REFRESH_MARGIN_SECONDS = 300
+
+
+def _expires_soon(token_data: dict) -> bool:
+    if not token_data.get("expires_at"):
+        return False
+    expires = datetime.fromisoformat(token_data["expires_at"]).timestamp()
+    return expires - REFRESH_MARGIN_SECONDS < time.time()
+
+
+@contextmanager
+def _refresh_lock(db_path: Optional[str]):
+    """Serialize refreshes across processes sharing this DB.
+
+    Whoop rotates refresh tokens: each refresh invalidates the previous one. If
+    two processes (the scheduler and Jarvis's health_pull_now) refresh at the
+    same moment, one of them burns the other's token and Whoop has to be
+    re-authorized by hand. A file lock next to the DB prevents that.
+    """
+    lock_file = Path(db_path or DB_PATH).with_name("whoop_token.lock")
+    with open(lock_file, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _refresh(token_data: dict, db_path: Optional[str]) -> Optional[dict]:
+    """Exchange the refresh token, save the rotated pair, return the new token row."""
+    if not token_data.get("refresh_token"):
+        logger.error(
+            "Whoop token expired and no refresh token is stored. Re-authorize once "
+            "with get_auth_url() (it now requests the offline scope)."
+        )
+        return None
+    logger.info("Whoop token expiring, refreshing...")
+    try:
+        resp = requests.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": token_data["refresh_token"],
+                "client_id": WHOOP_CLIENT_ID,
+                "client_secret": WHOOP_CLIENT_SECRET,
+                "scope": "offline",  # without it Whoop stops returning refresh tokens
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        new_token = resp.json()
+    except Exception as e:
+        logger.error("Whoop token refresh failed: %s", e)
+        return None
+
+    expires = None
+    if "expires_in" in new_token:
+        expires = datetime.fromtimestamp(
+            time.time() + new_token["expires_in"], tz=timezone.utc
+        ).isoformat()
+    db_kwargs = {"db_path": db_path} if db_path else {}
+    with get_db(**db_kwargs) as conn:
+        save_oauth_token(
+            conn, "whoop", new_token["access_token"],
+            new_token.get("refresh_token"),  # NULL keeps the old one (see database.py)
+            new_token.get("token_type", "Bearer"), expires,
+        )
+        token_data = load_oauth_token(conn, "whoop")
+    logger.info("Whoop token refreshed and saved")
+    return token_data
 
 
 def _get_session(db_path: Optional[str] = None) -> Optional[OAuth2Session]:
@@ -32,6 +108,16 @@ def _get_session(db_path: Optional[str] = None) -> Optional[OAuth2Session]:
         logger.warning("No Whoop OAuth token found in database")
         return None
 
+    if _expires_soon(token_data):
+        with _refresh_lock(db_path):
+            # Another process may have refreshed while we waited for the lock.
+            with get_db(**db_kwargs) as conn:
+                token_data = load_oauth_token(conn, "whoop")
+            if _expires_soon(token_data):
+                token_data = _refresh(token_data, db_path)
+                if not token_data:
+                    return None
+
     token = {
         "access_token": token_data["access_token"],
         "refresh_token": token_data.get("refresh_token", ""),
@@ -41,46 +127,6 @@ def _get_session(db_path: Optional[str] = None) -> Optional[OAuth2Session]:
         token["expires_at"] = float(
             datetime.fromisoformat(token_data["expires_at"]).timestamp()
         )
-
-    # Check if token is expired and refresh manually
-    import time
-    if token.get("expires_at") and token["expires_at"] < time.time():
-        logger.info("Whoop token expired, refreshing...")
-        try:
-            refresh_resp = requests.post(
-                TOKEN_URL,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": token["refresh_token"],
-                    "client_id": WHOOP_CLIENT_ID,
-                    "client_secret": WHOOP_CLIENT_SECRET,
-                },
-                timeout=30,
-            )
-            refresh_resp.raise_for_status()
-            new_token = refresh_resp.json()
-            token["access_token"] = new_token["access_token"]
-            if "refresh_token" in new_token:
-                token["refresh_token"] = new_token["refresh_token"]
-            if "expires_in" in new_token:
-                token["expires_at"] = time.time() + new_token["expires_in"]
-
-            # Save refreshed token
-            with get_db(**db_kwargs) as conn:
-                expires = None
-                if "expires_at" in token:
-                    expires = datetime.fromtimestamp(
-                        token["expires_at"], tz=timezone.utc
-                    ).isoformat()
-                save_oauth_token(
-                    conn, "whoop", token["access_token"],
-                    token.get("refresh_token"),
-                    token.get("token_type", "Bearer"), expires,
-                )
-            logger.info("Whoop token refreshed and saved")
-        except Exception as e:
-            logger.error("Whoop token refresh failed: %s", e)
-            return None
 
     # Create session without auto-refresh (we handle it manually above)
     session = OAuth2Session(
@@ -251,7 +297,9 @@ def get_auth_url() -> str:
     session = OAuth2Session(
         WHOOP_CLIENT_ID,
         redirect_uri=WHOOP_REDIRECT_URI,
-        scope=["read:recovery", "read:cycles", "read:sleep", "read:profile"],
+        # offline = refresh tokens. Without it the access token dies within the
+        # hour and every pull needs a manual re-auth.
+        scope=["offline", "read:recovery", "read:cycles", "read:sleep", "read:profile"],
     )
     url, _ = session.authorization_url(AUTHORIZE_URL)
     return url

@@ -40,6 +40,7 @@ Available domains and tools:
 - HOME: Thermostat status/set, lock status/set, sensors, schedules. For "set temp to X every Y" use home_schedule_add. For "lock the door at Y" use home_lock_schedule_add. For immediate "set temp to X" use home_thermostat_set.
 - HEALTH: Use health_ask for ANY question about sleep/recovery/HRV/strain/workouts. Use health_briefing only when asked for a summary.
 - MEMORY: Use remember_fact when you learn something lasting about the user (preferences, routines, context worth remembering). Use forget_fact to remove. Use list_facts to see what you know.
+- INBOX: Use brain_dump for "dump:", "note:", "idea:", "todo:", or any thought or task the user wants to handle later. Save their words as-is and reply in one short line. brain_dump is for things to act on or file; remember_fact is only for lasting facts about the user. Never call both for the same message.
 
 Critical rules:
 1. Execute lock/unlock commands immediately — no confirmation needed.
@@ -173,7 +174,7 @@ def handle_message(text: str, chat_id: str) -> None:
                 logger.info("Tool call: %s(%s)", fn_name, fn_args)
 
                 # Inject user_id into memory tools
-                if fn_name in ("remember_fact", "forget_fact", "list_facts"):
+                if fn_name in ("remember_fact", "forget_fact", "list_facts", "brain_dump"):
                     fn_args["_user_id"] = chat_id
 
                 result = call_tool(fn_name, fn_args)

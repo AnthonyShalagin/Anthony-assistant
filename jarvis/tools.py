@@ -269,6 +269,17 @@ def list_facts(_user_id: str = "") -> dict:
         return {"success": False, "message": f"Memory list error: {e}"}
 
 
+def brain_dump(content: str, _user_id: str = "") -> dict:
+    """Save a note, idea, or to-do to the Life OS inbox for filing later."""
+    try:
+        import memory
+        dump_id = memory.add_dump(_user_id, content)
+        return {"success": True,
+                "message": f"Saved to inbox (#{dump_id}). It gets filed at the next brief."}
+    except Exception as e:
+        return {"success": False, "message": f"Inbox save error: {e}"}
+
+
 # ---------- TOOL REGISTRY ----------
 # OpenAI-format function schemas that the LLM can call
 
@@ -480,6 +491,20 @@ TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "brain_dump",
+            "description": "Save a note, idea, or to-do to Anthony's Life OS inbox. It is filed into the right project and to-do list on his Mac at the next morning brief. Use for messages starting with 'dump:', 'note:', 'idea:', 'todo:', or anything he wants to deal with later.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The user's words as-is, minus any 'dump:' style prefix. Do not summarize."},
+                },
+                "required": ["content"],
+            },
+        },
+    },
 ]
 
 
@@ -502,6 +527,7 @@ TOOL_HANDLERS = {
     "remember_fact": remember_fact,
     "forget_fact": forget_fact,
     "list_facts": list_facts,
+    "brain_dump": brain_dump,
 }
 
 

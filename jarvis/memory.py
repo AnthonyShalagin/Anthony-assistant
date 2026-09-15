@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
+
+-- Brain dumps waiting to be filed by Life OS on Anthony's Mac (see inbox_cli.py).
+CREATE TABLE IF NOT EXISTS dumps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    processed_at TEXT                          -- NULL until filed
+);
+CREATE INDEX IF NOT EXISTS idx_dumps_pending ON dumps(processed_at);
 """
 
 
@@ -114,6 +124,51 @@ def facts_as_prompt_block(user_id: str) -> str:
         for f in by_cat[cat]:
             lines.append(f"    - {f['content']} (#{f['id']})")
     return "\n".join(lines)
+
+
+# ---- Brain dumps (Life OS inbox) ----
+
+def add_dump(user_id: str, content: str) -> int:
+    """Store a brain dump for later filing. Returns dump id."""
+    with _conn() as c:
+        cursor = c.execute(
+            "INSERT INTO dumps (user_id, content) VALUES (?, ?)",
+            (user_id, content.strip()),
+        )
+        return cursor.lastrowid
+
+
+def pending_dumps() -> list[dict]:
+    """Unfiled dumps, oldest first, with created_at in Eastern time."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, content, created_at FROM dumps "
+            "WHERE processed_at IS NULL ORDER BY id"
+        ).fetchall()
+    result = []
+    for r in rows:
+        # SQLite datetime('now') is UTC with no offset marker.
+        utc = datetime.fromisoformat(r["created_at"]).replace(tzinfo=ZoneInfo("UTC"))
+        result.append({
+            "id": r["id"],
+            "content": r["content"],
+            "created_at": utc.astimezone(ET).isoformat(timespec="minutes"),
+        })
+    return result
+
+
+def mark_dumps_done(ids: list[int]) -> int:
+    """Stamp dumps as filed. Returns how many changed."""
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    with _conn() as c:
+        cursor = c.execute(
+            f"UPDATE dumps SET processed_at = datetime('now') "
+            f"WHERE processed_at IS NULL AND id IN ({placeholders})",
+            list(ids),
+        )
+        return cursor.rowcount
 
 
 # ---- Messages / conversation history ----

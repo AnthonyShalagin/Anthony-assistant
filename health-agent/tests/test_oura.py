@@ -63,7 +63,27 @@ def _mock_oura_responses():
     hrv_resp.status_code = 200
     hrv_resp.raise_for_status = MagicMock()
 
-    return [sleep_resp, readiness_resp, activity_resp, hrv_resp]
+    workout_resp = MagicMock()
+    workout_resp.json.return_value = {
+        "data": [
+            {   # Strong session imported through Apple Health
+                "activity": "strength_training",
+                "day": "2024-03-14",
+                "start_datetime": "2024-03-14T18:00:00-04:00",
+                "end_datetime": "2024-03-14T18:50:00-04:00",
+            },
+            {
+                "activity": "walking",
+                "day": "2024-03-15",
+                "start_datetime": "2024-03-15T07:00:00-04:00",
+                "end_datetime": "2024-03-15T07:30:00-04:00",
+            },
+        ]
+    }
+    workout_resp.status_code = 200
+    workout_resp.raise_for_status = MagicMock()
+
+    return [sleep_resp, readiness_resp, activity_resp, hrv_resp, workout_resp]
 
 
 @patch("clients.oura.requests.get")
@@ -78,6 +98,27 @@ def test_pull_daily_stores_metrics(mock_get, tmp_db):
     assert "readiness_score" in summary
     assert "activity_score" in summary
     assert "hrv_average" in summary
+
+
+@patch("clients.oura.requests.get")
+def test_pull_daily_counts_strength_workouts(mock_get, tmp_db):
+    """Workouts for yesterday and today are stored per day, zeros included."""
+    from database import get_db
+
+    mock_get.side_effect = _mock_oura_responses()
+    summary = pull_daily("2024-03-15", token="fake-token", db_path=tmp_db)
+
+    assert summary["workouts"]["2024-03-14"]["strength_sessions"] == 1
+    assert summary["workouts"]["2024-03-14"]["strength_minutes"] == 50.0
+    assert summary["workouts"]["2024-03-15"]["strength_sessions"] == 0
+    assert summary["workouts"]["2024-03-15"]["workout_count"] == 1
+
+    with get_db(tmp_db) as conn:
+        row = conn.execute(
+            "SELECT value FROM health_metrics WHERE date='2024-03-15' "
+            "AND source='oura' AND metric_name='strength_sessions'"
+        ).fetchone()
+    assert row["value"] == 0
 
 
 @patch("clients.oura.requests.get")

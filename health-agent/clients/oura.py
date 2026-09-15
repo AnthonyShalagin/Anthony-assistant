@@ -5,7 +5,7 @@ API docs: https://cloud.ouraring.com/v2/docs
 """
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import requests
@@ -52,6 +52,30 @@ def fetch_activity(dt: Optional[str] = None, token: Optional[str] = None) -> lis
     next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
     data = _get("daily_activity", {"start_date": target, "end_date": next_day}, token)
     return data.get("data", [])
+
+
+def fetch_workouts(start: str, end: str, token: Optional[str] = None) -> list[dict]:
+    """Fetch workouts between two dates.
+
+    Strong writes each session to Apple Health and Oura imports it from there,
+    so this is how strength training arrives without a CSV export.
+    """
+    data = _get("workout", {"start_date": start, "end_date": end}, token)
+    return data.get("data", [])
+
+
+def _is_strength(workout: dict) -> bool:
+    activity = (workout.get("activity") or "").lower()
+    return "strength" in activity or "weight" in activity
+
+
+def _minutes(workout: dict) -> float:
+    try:
+        start = datetime.fromisoformat(workout["start_datetime"])
+        end = datetime.fromisoformat(workout["end_datetime"])
+        return round((end - start).total_seconds() / 60, 1)
+    except (KeyError, TypeError, ValueError):
+        return 0.0
 
 
 def fetch_hrv(dt: Optional[str] = None, token: Optional[str] = None) -> list[dict]:
@@ -151,6 +175,34 @@ def pull_daily(dt: Optional[str] = None, token: Optional[str] = None, db_path: O
         except requests.RequestException as e:
             logger.error("Oura HRV fetch failed: %s", e)
             summary["hrv_error"] = str(e)
+
+        # Workouts: yesterday and today. The pull runs mid-morning, so an evening
+        # session only shows up on the next day's run. Every day in the window is
+        # written, zeros included, so a rest day reads as 0 rather than missing.
+        try:
+            yesterday = (date.fromisoformat(target) - timedelta(days=1)).isoformat()
+            next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
+            days = {d: {"workout_count": 0, "workout_minutes": 0.0,
+                        "strength_sessions": 0, "strength_minutes": 0.0}
+                    for d in (yesterday, target)}
+            for w in fetch_workouts(yesterday, next_day, token):
+                day = days.get(w.get("day"))
+                if day is None:
+                    continue
+                mins = _minutes(w)
+                day["workout_count"] += 1
+                day["workout_minutes"] += mins
+                if _is_strength(w):
+                    day["strength_sessions"] += 1
+                    day["strength_minutes"] += mins
+            for d, values in days.items():
+                for name, value in values.items():
+                    upsert_metric(conn, d, "oura", name, value,
+                                  "minutes" if name.endswith("minutes") else "count")
+            summary["workouts"] = days
+        except requests.RequestException as e:
+            logger.error("Oura workout fetch failed: %s", e)
+            summary["workout_error"] = str(e)
 
     logger.info("Oura pull complete for %s: %d metrics", target, len(summary))
     return summary

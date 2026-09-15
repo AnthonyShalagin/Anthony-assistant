@@ -7,7 +7,7 @@ Personal health intelligence agent built on Hermes Agent (by Nous Research) that
 - Pulls daily data from Oura Ring and Whoop APIs
 - Accepts Strong app CSV uploads via Telegram
 - Stores everything in SQLite
-- Delivers daily/weekly health briefings via Telegram using LLM analysis
+- Generates health briefings on demand (via Jarvis); the weekly summary lives in the Life OS review
 - Runs on a VPS in a security-hardened Docker container
 
 GitHub base: <https://github.com/NousResearch/hermes-agent>
@@ -111,18 +111,20 @@ health-agent/
 ### Oura Ring
 - **Auth**: Bearer token (`OURA_TOKEN`)
 - **Base URL**: `https://api.ouraring.com/v2/usercollection`
-- **Endpoints**: `daily_sleep`, `daily_readiness`, `daily_activity`, `daily_hrv`
-- **Metrics**: sleep_score, readiness_score, activity_score, hrv_average, steps, active_calories, heart_rate_average, breath_average, temperature_deviation
+- **Endpoints**: `daily_sleep`, `daily_readiness`, `daily_activity`, `daily_hrv`, `workout`
+- **Metrics**: sleep_score, readiness_score, activity_score, hrv_average, steps, active_calories, heart_rate_average, breath_average, temperature_deviation, workout_count, workout_minutes, strength_sessions, strength_minutes
+- **Workouts**: Anthony logs lifting only in Strong. Strong writes to Apple Health and Oura imports it, so `workout` is how training shows up without CSV exports. Each pull writes yesterday and today, zeros included.
+- **Token caveat**: Oura stopped issuing personal access tokens in Dec 2025. Older tokens may keep working; if pulls start returning 401, move to Oura OAuth2.
 
 ### Whoop
-- **Auth**: OAuth2 with auto token refresh
-- **Base URL**: `https://api.whoop.com/developer/v1`
+- **Auth**: OAuth2 with the `offline` scope, so a refresh token is issued
+- **Base URL**: `https://api.prod.whoop.com/developer/v2`
 - **Endpoints**: `recovery`, `cycle`, `activity/sleep`
 - **Metrics**: recovery_score, resting_heart_rate, hrv_rmssd, spo2, skin_temp, strain_score, kilojoules, avg_heart_rate, sleep_performance, sleep_consistency, sleep_efficiency
-- **Token refresh**: Automatic via `requests-oauthlib` token_updater callback
+- **Token refresh**: manual in `_get_session`, 5 minutes before expiry, sending `scope=offline`. Whoop rotates refresh tokens (each refresh kills the previous one), so refreshes are serialized with a file lock next to the DB. Both the scheduler and Jarvis must point at the same DB, or they will invalidate each other's tokens.
 
 ### Strong App
-- **Input**: CSV file uploaded via Telegram
+- **Input**: CSV file uploaded via Telegram (optional, only for set-level detail; session counts come from Oura)
 - **Expected columns**: Date, Workout Name, Exercise Name, Set Order, Weight, Reps
 - **Calculations**: Volume (weight × reps), Estimated 1RM (Epley: weight × (1 + reps/30))
 
@@ -132,11 +134,14 @@ health-agent/
 
 | Time          | Job              | Description                       |
 |---------------|------------------|-----------------------------------|
-| 06:00 daily   | Healthcheck      | DB + API token verification       |
-| 07:00 daily   | Oura Pull        | Sleep, readiness, activity, HRV   |
-| 07:05 daily   | Whoop Pull       | Recovery, strain, sleep            |
-| 07:30 daily   | Daily Briefing   | LLM analysis + Telegram delivery  |
-| 09:00 Sunday  | Weekly Briefing  | 7-day deep-dive with trends       |
+| 09:00 daily   | Healthcheck      | DB + API token verification (silent) |
+| 09:30 daily   | Oura Pull        | Sleep, readiness, activity, HRV, workouts |
+| 09:35 daily   | Whoop Pull       | Recovery, strain, sleep            |
+| 09:40 daily   | Supabase Sync    | Push last 7 days to the dashboard  |
+
+No scheduled Telegram messages. Health is one section of the Sunday Life OS
+review on Anthony's Mac, which reads this DB over ssh with `export_week.py`
+(stdlib, read-only). Briefings are still available on demand through Jarvis.
 
 ---
 
