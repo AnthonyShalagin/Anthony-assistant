@@ -122,6 +122,32 @@ def test_pull_daily_counts_strength_workouts(mock_get, tmp_db):
 
 
 @patch("clients.oura.requests.get")
+def test_pull_daily_repulls_yesterdays_full_activity(mock_get, tmp_db):
+    """Yesterday's finished steps overwrite the partial morning snapshot."""
+    from database import get_db, upsert_metric
+
+    with get_db(tmp_db) as conn:  # what the previous morning's pull stored
+        upsert_metric(conn, "2024-03-14", "oura", "steps", 210, "steps")
+
+    responses = _mock_oura_responses()
+    responses[2].json.return_value = {"data": [
+        {"day": "2024-03-14", "score": 85, "steps": 9400, "active_calories": 510},
+        {"day": "2024-03-15", "score": 88, "steps": 240, "active_calories": 20},
+    ]}
+    mock_get.side_effect = responses
+
+    summary = pull_daily("2024-03-15", token="fake-token", db_path=tmp_db)
+
+    assert summary["steps"] == 240  # summary still describes the target day
+    with get_db(tmp_db) as conn:
+        row = conn.execute(
+            "SELECT value FROM health_metrics WHERE date='2024-03-14' "
+            "AND source='oura' AND metric_name='steps'"
+        ).fetchone()
+    assert row["value"] == 9400
+
+
+@patch("clients.oura.requests.get")
 def test_pull_daily_handles_api_error(mock_get, tmp_db):
     """pull_daily handles API errors gracefully."""
     import requests

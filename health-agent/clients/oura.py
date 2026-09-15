@@ -140,21 +140,29 @@ def pull_daily(dt: Optional[str] = None, token: Optional[str] = None, db_path: O
             logger.error("Oura readiness fetch failed: %s", e)
             summary["readiness_error"] = str(e)
 
-        # Activity
+        # Activity: yesterday and today. The pull runs mid-morning, so today's
+        # row only has a few hundred steps; re-pulling yesterday overwrites its
+        # early-morning snapshot with the finished day. Without this every
+        # stored day looked like ~200 steps.
         try:
-            activity_data = fetch_activity(target, token)
-            if activity_data:
-                a = activity_data[0]
-                score = a.get("score")
-                if score is not None:
-                    upsert_metric(conn, target, "oura", "activity_score", score, "score")
-                    summary["activity_score"] = score
+            yesterday = (date.fromisoformat(target) - timedelta(days=1)).isoformat()
+            next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
+            activity_data = _get("daily_activity",
+                                 {"start_date": yesterday, "end_date": next_day}, token).get("data", [])
+            for a in activity_data:
+                day = a.get("day") or target
+                if day not in (yesterday, target):
+                    continue
+                values = {"activity_score": (a.get("score"), "score")}
                 for key in ("active_calories", "steps", "equivalent_walking_distance"):
-                    val = a.get(key)
-                    if val is not None:
-                        unit = "kcal" if "calories" in key else ("steps" if key == "steps" else "meters")
-                        upsert_metric(conn, target, "oura", key, val, unit)
-                        summary[key] = val
+                    unit = "kcal" if "calories" in key else ("steps" if key == "steps" else "meters")
+                    values[key] = (a.get(key), unit)
+                for name, (val, unit) in values.items():
+                    if val is None:
+                        continue
+                    upsert_metric(conn, day, "oura", name, val, unit)
+                    if day == target:
+                        summary[name] = val
         except requests.RequestException as e:
             logger.error("Oura activity fetch failed: %s", e)
             summary["activity_error"] = str(e)
