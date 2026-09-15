@@ -4,8 +4,10 @@
         Prints the Whoop login link. Open it, log in, approve. Whoop redirects to
         WHOOP_REDIRECT_URI; the page may not load, which is fine. Copy that URL.
 
-    .venv/bin/python whoop_auth.py finish '<the redirected URL>'
-        Exchanges the code (single use, expires in minutes) and stores the tokens.
+    .venv/bin/python whoop_auth.py finish
+        Paste the redirected URL on stdin. It is read from stdin rather than the
+        command line so the code never lands in shell history or `ps`. The code
+        is single use and expires in minutes.
 
 The login now includes the offline scope, so Whoop issues a refresh token and
 clients/whoop.py keeps it renewed. This should be the last manual login.
@@ -25,9 +27,13 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "url":
         print(get_auth_url())
         return 0
-    if len(argv) == 3 and argv[1] == "finish":
+    if len(argv) == 2 and argv[1] == "finish":
+        redirected = sys.stdin.readline().strip()
+        if not redirected.startswith("https://"):
+            print("Expected the redirected https:// URL on stdin", file=sys.stderr)
+            return 1
         init_db()
-        token = complete_auth(argv[2])
+        token = complete_auth(redirected)
         print(f"Saved. Refresh token received: {bool(token.get('refresh_token'))}. "
               f"Scope: {token.get('scope')}")
         return 0
