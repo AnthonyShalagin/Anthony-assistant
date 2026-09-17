@@ -32,7 +32,14 @@ def main(argv: list[str]) -> int:
     failures = 0
     for i in range(days, -1, -1):
         day = (today - timedelta(days=i)).isoformat()
-        summary = pull_daily(day)
+        # One bad day (API timeout, locked DB) shouldn't abandon the rest.
+        # Re-running the script fixes whatever failed.
+        try:
+            summary = pull_daily(day)
+        except Exception as e:
+            failures += 1
+            print(f"{day}  FAILED: {type(e).__name__}: {e}")
+            continue
         errors = [k for k in summary if k.endswith("_error")]
         if errors:
             failures += 1

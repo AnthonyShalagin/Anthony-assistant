@@ -52,6 +52,10 @@ def get_db(db_path: str = DB_PATH):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # The long-running service and any one-off script (backfill, manual pull)
+    # write to the same DB. Without this, a write that lands mid-transaction
+    # fails instantly with "database is locked"; now it waits its turn.
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
