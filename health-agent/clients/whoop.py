@@ -149,8 +149,13 @@ def _get(endpoint: str, params: dict = None, db_path: Optional[str] = None) -> d
     return resp.json()
 
 
-def fetch_recovery(dt: Optional[str] = None, db_path: Optional[str] = None) -> list[dict]:
-    """Fetch recovery data. Tries date-filtered first, then latest."""
+def fetch_recovery(dt: Optional[str] = None, db_path: Optional[str] = None,
+                   strict: bool = False) -> list[dict]:
+    """Fetch recovery data. Tries date-filtered first, then latest.
+
+    strict=True skips the latest-record fallback. Backfilling past dates must
+    use it, or the newest recovery gets written onto every empty older day.
+    """
     target = dt or date.today().isoformat()
     next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
     # Try with date range
@@ -160,7 +165,7 @@ def fetch_recovery(dt: Optional[str] = None, db_path: Optional[str] = None) -> l
         db_path,
     )
     records = data.get("records", [])
-    if records:
+    if records or strict:
         return records
     # Fallback: get latest without date filter
     data = _get("recovery", {"limit": 1}, db_path)
@@ -179,8 +184,9 @@ def fetch_strain(dt: Optional[str] = None, db_path: Optional[str] = None) -> lis
     return data.get("records", [])
 
 
-def fetch_sleep(dt: Optional[str] = None, db_path: Optional[str] = None) -> list[dict]:
-    """Fetch sleep data. Tries date-filtered first, then latest."""
+def fetch_sleep(dt: Optional[str] = None, db_path: Optional[str] = None,
+                strict: bool = False) -> list[dict]:
+    """Fetch sleep data. Tries date-filtered first, then latest (see fetch_recovery)."""
     target = dt or date.today().isoformat()
     next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
     data = _get(
@@ -189,15 +195,20 @@ def fetch_sleep(dt: Optional[str] = None, db_path: Optional[str] = None) -> list
         db_path,
     )
     records = data.get("records", [])
-    if records:
+    if records or strict:
         return records
     # Fallback: get latest without date filter
     data = _get("activity/sleep", {"limit": 1}, db_path)
     return data.get("records", [])
 
 
-def pull_daily(dt: Optional[str] = None, db_path: Optional[str] = None) -> dict:
-    """Pull all Whoop metrics for a date and store in DB."""
+def pull_daily(dt: Optional[str] = None, db_path: Optional[str] = None,
+               strict: bool = False) -> dict:
+    """Pull all Whoop metrics for a date and store in DB.
+
+    strict=True is for backfills: a day with no data stays empty instead of
+    inheriting the most recent record.
+    """
     target = dt or date.today().isoformat()
     summary = {}
     db_kwargs = {"db_path": db_path} if db_path else {}
@@ -205,7 +216,7 @@ def pull_daily(dt: Optional[str] = None, db_path: Optional[str] = None) -> dict:
     with get_db(**db_kwargs) as conn:
         # Recovery
         try:
-            recovery_data = fetch_recovery(target, db_path)
+            recovery_data = fetch_recovery(target, db_path, strict=strict)
             if recovery_data:
                 r = recovery_data[0]
                 score = r.get("score", {})
@@ -259,7 +270,7 @@ def pull_daily(dt: Optional[str] = None, db_path: Optional[str] = None) -> dict:
 
         # Sleep
         try:
-            sleep_data = fetch_sleep(target, db_path)
+            sleep_data = fetch_sleep(target, db_path, strict=strict)
             if sleep_data:
                 s = sleep_data[0]
                 score = s.get("score", {})

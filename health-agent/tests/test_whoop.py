@@ -72,6 +72,31 @@ def test_pull_daily_stores_metrics(mock_session_cls, tmp_db):
     assert "sleep_performance" in summary
 
 
+@patch("clients.whoop.OAuth2Session")
+def test_strict_pull_does_not_inherit_latest_record(mock_session_cls, tmp_db):
+    """Backfilling an empty day must not copy the newest recovery onto it."""
+    with get_db(tmp_db) as conn:
+        save_oauth_token(conn, "whoop", "access", "refresh",
+                         expires_at="2099-01-01T00:00:00+00:00")
+
+    empty = MagicMock()
+    empty.json.return_value = {"records": []}
+    empty.status_code = 200
+    empty.raise_for_status = MagicMock()
+
+    mock_session = MagicMock()
+    mock_session_cls.return_value = mock_session
+    mock_session.get.return_value = empty
+
+    from clients.whoop import pull_daily
+    summary = pull_daily("2026-08-15", db_path=tmp_db, strict=True)
+
+    assert "recovery_score" not in summary
+    assert "sleep_performance" not in summary
+    # recovery, cycle, sleep: one call each, no latest-record fallbacks
+    assert mock_session.get.call_count == 3
+
+
 @patch("clients.whoop.requests.post")
 def test_expired_token_refreshes_with_offline_scope(mock_post, tmp_db):
     """An expiring token is refreshed once, and the rotated refresh token is saved."""
