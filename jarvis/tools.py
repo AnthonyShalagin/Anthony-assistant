@@ -96,7 +96,7 @@ def health_ask(question: str) -> dict:
 
 
 def health_pull_now() -> dict:
-    """Force-pull the latest Oura and Whoop data right now."""
+    """Force-pull the latest Oura, Whoop, and Hevy data right now."""
     messages = []
     try:
         from clients.oura import pull_daily as oura_pull
@@ -117,6 +117,13 @@ def health_pull_now() -> dict:
         messages.append(f"Whoop: {len([k for k in r if not k.endswith('_error')])} metrics")
     except Exception as e:
         messages.append(f"Whoop error: {e}")
+
+    try:
+        from clients.hevy import pull_daily as hevy_pull
+        r = hevy_pull(db_path=HEALTH_DB_PATH)
+        messages.append(f"Hevy error: {r['error']}" if "error" in r else f"Hevy: {r['workouts']} workouts")
+    except Exception as e:
+        messages.append(f"Hevy error: {e}")
 
     return {"success": True, "message": " | ".join(messages)}
 
@@ -340,7 +347,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "health_pull_now",
-            "description": "Force-pull the latest Oura and Whoop data from their APIs (useful if data seems stale).",
+            "description": "Force-pull the latest Oura, Whoop, and Hevy data from their APIs (useful if data seems stale).",
             "parameters": {"type": "object", "properties": {}},
         },
     },

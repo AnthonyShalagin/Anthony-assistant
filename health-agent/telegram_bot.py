@@ -147,7 +147,7 @@ def _build_health_context(db_path: Optional[str] = None) -> str:
 
             # Averages
             parts.append("=== AVERAGES ===")
-            for source in ["oura", "whoop"]:
+            for source in ["oura", "whoop", "hevy"]:
                 for metric in get_metrics(conn, source=source, days=1):
                     name = metric["metric_name"]
                     avg7 = get_metric_average(conn, source, name, 7)
