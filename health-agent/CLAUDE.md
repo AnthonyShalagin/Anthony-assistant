@@ -112,9 +112,11 @@ health-agent/
 ### Oura Ring
 - **Auth**: Bearer token (`OURA_TOKEN`)
 - **Base URL**: `https://api.ouraring.com/v2/usercollection`
-- **Endpoints**: `daily_sleep`, `daily_readiness`, `daily_activity`, `daily_hrv`, `workout`
-- **Metrics**: sleep_score, readiness_score, activity_score, hrv_average, steps, active_calories, heart_rate_average, breath_average, temperature_deviation, workout_count, workout_minutes, strength_sessions, strength_minutes
-- **Workouts**: Anthony logs lifting only in Strong. Strong writes to Apple Health and Oura imports it, so `workout` is how training shows up without CSV exports. Each pull writes yesterday and today, zeros included.
+- **Endpoints**: `daily_sleep`, `daily_readiness` (incl. temperature_deviation), `daily_activity`, `sleep` (main night: HRV, resting HR = lowest HR, breathing, sleep durations; naps skipped), `workout`. There is no `daily_hrv` endpoint (it 404s); HRV was missing until Sept 2026.
+- **Sandbox**: `/v2/sandbox/usercollection/...` accepts any bearer token and returns sample data, handy for testing without a real token.
+- **Metrics**: sleep_score, readiness_score, activity_score, hrv_average, resting_heart_rate, total/deep/rem/light_sleep_duration, sleep_efficiency_pct, steps, active_calories, heart_rate_average, breath_average, temperature_deviation, workout_count, workout_minutes, strength_sessions, strength_minutes
+- **Workouts**: lifting now comes from Hevy (see below); Oura's `workout` counts are kept but aren't the source of truth. Each pull writes yesterday and today, zeros included.
+- **Source of truth**: Oura for HRV, resting HR, sleep, temperature (more accurate vs ECG/PSG); Whoop for recovery and strain; never mix HRV sources in one trend.
 - **Token caveat**: Oura stopped issuing personal access tokens in Dec 2025. Older tokens may keep working; if pulls start returning 401, move to Oura OAuth2.
 
 ### Hevy (lifting, from Sept 2026)

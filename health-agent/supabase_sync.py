@@ -5,9 +5,12 @@ pivots them into the Supabase schema, and upserts. Designed to run after
 the Oura + Whoop pulls each morning so the dashboard always reflects
 the latest day.
 
-Convention for daily_metrics columns:
-- hrv, rhr, sleep_score, sleep_hours, steps  → Oura (primary, more accurate)
-- recovery_score, strain                     → Whoop only
+One source per metric, never both (Oura and Whoop measure HRV differently, so
+mixing them would corrupt a trend):
+- hrv, rhr, sleep_score, sleep_hours, steps  → Oura
+- recovery_score, strain                     → Whoop
+Why Oura for HRV and resting HR: Dial et al. 2025 vs ECG, Oura Gen3/Gen4
+CCC 0.97-0.99 vs Whoop 4.0 0.91-0.94 (https://pmc.ncbi.nlm.nih.gov/articles/PMC12367097/).
 """
 
 from __future__ import annotations
@@ -26,12 +29,11 @@ logger = logging.getLogger(__name__)
 
 # SQLite metric_name → daily_metrics column. Source-specific (preferred provider).
 #
-# Important: Oura stores `readiness_resting_heart_rate` as a 0-100 CONTRIBUTOR
-# SCORE (not BPM), so for true RHR we use Whoop. Same for sleep stage detail —
-# Oura's daily_sleep endpoint doesn't return total duration, so sleep_hours
-# falls back to whatever was already in the column.
+# `readiness_resting_heart_rate` is a 0-100 contributor score, not bpm. Real
+# resting HR, HRV and sleep duration come from Oura's /sleep endpoint.
 OURA_METRIC_MAP = {
-    "hrv_average": "hrv",                  # ms (Oura primary, more accurate)
+    "hrv_average": "hrv",                  # ms
+    "resting_heart_rate": "rhr",           # bpm, lowest HR of the night
     "sleep_score": "sleep_score",          # 0-100
     "total_sleep_duration": "sleep_hours", # seconds → /3600 (special-cased)
     "steps": "steps",                      # int
@@ -40,7 +42,6 @@ OURA_METRIC_MAP = {
 WHOOP_METRIC_MAP = {
     "recovery_score": "recovery_score",    # 0-100 (Whoop only)
     "strain_score": "strain",              # 0-21 (Whoop only)
-    "resting_heart_rate": "rhr",           # bpm (Whoop only — Oura doesn't store real RHR)
 }
 
 
@@ -178,5 +179,7 @@ def _infer_group(exercise: str) -> str:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    result = sync(days=7)
+    # `python supabase_sync.py 180` re-pushes history after a backfill
+    import sys
+    result = sync(days=int(sys.argv[1]) if len(sys.argv) > 1 else 7)
     print(f"Synced: {result}")

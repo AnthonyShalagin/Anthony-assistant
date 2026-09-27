@@ -26,6 +26,7 @@ def _mock_oura_responses():
     readiness_resp.json.return_value = {
         "data": [{
             "score": 75,
+            "temperature_deviation": 0.1,
             "contributors": {
                 "activity_balance": 80,
                 "body_temperature": 90,
@@ -52,13 +53,15 @@ def _mock_oura_responses():
     activity_resp.raise_for_status = MagicMock()
 
     hrv_resp = MagicMock()
-    hrv_resp.json.return_value = {
-        "data": [{
-            "breath_average": 15.5,
-            "heart_rate_average": 58,
-            "hrv_average": 42,
-            "temperature_deviation": 0.1,
-        }]
+    hrv_resp.json.return_value = {   # /sleep, shaped like the Oura sandbox
+        "data": [
+            {"day": "2024-03-15", "type": "late_nap", "average_hrv": 30,
+             "lowest_heart_rate": 70, "total_sleep_duration": 2370},
+            {"day": "2024-03-15", "type": "long_sleep", "average_hrv": 42,
+             "lowest_heart_rate": 52, "average_heart_rate": 58.0, "average_breath": 15.5,
+             "total_sleep_duration": 26100, "deep_sleep_duration": 5400,
+             "rem_sleep_duration": 6300, "light_sleep_duration": 14400, "efficiency": 91},
+        ]
     }
     hrv_resp.status_code = 200
     hrv_resp.raise_for_status = MagicMock()
@@ -97,7 +100,11 @@ def test_pull_daily_stores_metrics(mock_get, tmp_db):
     assert summary["sleep_score"] == 82
     assert "readiness_score" in summary
     assert "activity_score" in summary
-    assert "hrv_average" in summary
+    assert summary["hrv_average"] == 42          # main night, not the nap
+    assert summary["resting_heart_rate"] == 52
+    assert summary["total_sleep_duration"] == 26100
+    assert summary["sleep_efficiency_pct"] == 91
+    assert summary["temperature_deviation"] == 0.1
 
 
 @patch("clients.oura.requests.get")

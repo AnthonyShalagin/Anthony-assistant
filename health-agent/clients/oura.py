@@ -78,12 +78,39 @@ def _minutes(workout: dict) -> float:
         return 0.0
 
 
-def fetch_hrv(dt: Optional[str] = None, token: Optional[str] = None) -> list[dict]:
-    """Fetch HRV data for a date."""
+def fetch_sleep_periods(dt: Optional[str] = None, token: Optional[str] = None) -> list[dict]:
+    """Fetch sleep periods (nights and naps) for a date.
+
+    Nightly HRV, heart rate, breathing and sleep durations live here. There is
+    no `daily_hrv` endpoint; the old code called one and got a 404 every day.
+    """
     target = dt or date.today().isoformat()
     next_day = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
-    data = _get("daily_hrv", {"start_date": target, "end_date": next_day}, token)
+    data = _get("sleep", {"start_date": target, "end_date": next_day}, token)
     return data.get("data", [])
+
+
+def main_sleep(periods: list[dict], day: str) -> Optional[dict]:
+    """The night's main sleep for `day`: prefer type long_sleep, then the longest."""
+    same_day = [p for p in periods if p.get("day") == day]
+    if not same_day:
+        return None
+    return max(same_day, key=lambda p: (p.get("type") == "long_sleep", p.get("total_sleep_duration") or 0))
+
+
+# sleep-period field -> (metric name, unit). Oura defines resting HR as the
+# lowest heart rate during the night, which is what its app shows.
+SLEEP_FIELDS = {
+    "average_hrv": ("hrv_average", "ms"),
+    "lowest_heart_rate": ("resting_heart_rate", "bpm"),
+    "average_heart_rate": ("heart_rate_average", "bpm"),
+    "average_breath": ("breath_average", "brpm"),
+    "total_sleep_duration": ("total_sleep_duration", "seconds"),
+    "deep_sleep_duration": ("deep_sleep_duration", "seconds"),
+    "rem_sleep_duration": ("rem_sleep_duration", "seconds"),
+    "light_sleep_duration": ("light_sleep_duration", "seconds"),
+    "efficiency": ("sleep_efficiency_pct", "%"),
+}
 
 
 def pull_daily(dt: Optional[str] = None, token: Optional[str] = None, db_path: Optional[str] = None) -> dict:
@@ -107,11 +134,7 @@ def pull_daily(dt: Optional[str] = None, token: Optional[str] = None, db_path: O
                     "sleep_efficiency": contributors.get("efficiency"),
                     "sleep_latency": contributors.get("latency"),
                     "sleep_restfulness": contributors.get("restfulness"),
-                    "total_sleep_duration": s.get("timestamp") and None,  # placeholder
                 }
-                # Extract total sleep if available in nested data
-                if "total_sleep_duration" in s:
-                    metrics["total_sleep_duration"] = s["total_sleep_duration"]
                 for name, value in metrics.items():
                     if value is not None:
                         upsert_metric(conn, target, "oura", name, value, "score" if "score" in name else "seconds")
@@ -129,6 +152,10 @@ def pull_daily(dt: Optional[str] = None, token: Optional[str] = None, db_path: O
                 if score is not None:
                     upsert_metric(conn, target, "oura", "readiness_score", score, "score")
                     summary["readiness_score"] = score
+                if r.get("temperature_deviation") is not None:
+                    upsert_metric(conn, target, "oura", "temperature_deviation",
+                                  r["temperature_deviation"], "°C")
+                    summary["temperature_deviation"] = r["temperature_deviation"]
                 contributors = r.get("contributors", {})
                 for key in ("activity_balance", "body_temperature", "hrv_balance",
                             "recovery_index", "resting_heart_rate", "sleep_balance"):
@@ -167,21 +194,17 @@ def pull_daily(dt: Optional[str] = None, token: Optional[str] = None, db_path: O
             logger.error("Oura activity fetch failed: %s", e)
             summary["activity_error"] = str(e)
 
-        # HRV
+        # Night: HRV, resting HR, breathing, sleep durations
         try:
-            hrv_data = fetch_hrv(target, token)
-            if hrv_data:
-                h = hrv_data[0]
-                for key in ("breath_average", "heart_rate_average", "hrv_average",
-                            "temperature_deviation"):
-                    val = h.get(key)
+            night = main_sleep(fetch_sleep_periods(target, token), target)
+            if night:
+                for field, (name, unit) in SLEEP_FIELDS.items():
+                    val = night.get(field)
                     if val is not None:
-                        unit = {"breath_average": "brpm", "heart_rate_average": "bpm",
-                                "hrv_average": "ms", "temperature_deviation": "°C"}.get(key, "")
-                        upsert_metric(conn, target, "oura", key, val, unit)
-                        summary[key] = val
+                        upsert_metric(conn, target, "oura", name, val, unit)
+                        summary[name] = val
         except requests.RequestException as e:
-            logger.error("Oura HRV fetch failed: %s", e)
+            logger.error("Oura sleep-period fetch failed: %s", e)
             summary["hrv_error"] = str(e)
 
         # Workouts: yesterday and today. The pull runs mid-morning, so an evening
