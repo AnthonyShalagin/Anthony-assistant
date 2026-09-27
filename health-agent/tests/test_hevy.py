@@ -68,3 +68,22 @@ def test_fetch_stops_paging_once_past_start(mock_get):
 def test_pull_daily_returns_error_instead_of_raising(mock_get, tmp_db):
     mock_get.side_effect = requests.ConnectionError("down")
     assert "error" in pull_daily("2026-09-20", api_key="k", db_path=tmp_db)
+
+
+@patch("clients.hevy.requests.get")
+def test_real_response_quirks(mock_get, tmp_db):
+    """Shapes seen in the live API (Sept 27 2026): '+00:00' timestamps, a duration-only
+    'Warm Up', bodyweight sets with no weight, and a carry with no reps."""
+    w = {"id": "x", "title": "Full Body", "start_time": "2026-09-27T15:01:55+00:00",
+         "end_time": "2026-09-27T15:40:36+00:00", "exercises": [
+             {"title": "Warm Up", "sets": [{"type": "normal", "weight_kg": None, "reps": None,
+                                            "duration_seconds": 2317, "rpe": None}]},
+             {"title": "Push Up", "sets": [{"type": "warmup", "weight_kg": None, "reps": 5, "rpe": None},
+                                           {"type": "normal", "weight_kg": None, "reps": 8, "rpe": None}]},
+             {"title": "Farmers Walk", "sets": [{"type": "normal", "weight_kg": 18.14, "reps": None, "rpe": None}]},
+         ]}
+    mock_get.return_value = _resp([w])
+    day = pull_range("2026-09-27", "2026-09-27", api_key="k", db_path=tmp_db)["days"]["2026-09-27"]
+    assert day["strength_sessions"] == 1
+    assert day["strength_minutes"] == 38.7
+    assert day["working_sets"] == 2

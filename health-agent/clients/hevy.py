@@ -79,7 +79,11 @@ def fetch_workouts(start: str, api_key: Optional[str] = None) -> list[dict]:
 
 
 def _is_working(s: dict) -> bool:
-    return s.get("type") != "warmup"
+    """Counts bodyweight sets (reps, no weight) and carries (weight, no reps).
+
+    Skips warmups and duration-only entries like Hevy's "Warm Up" exercise.
+    """
+    return s.get("type") != "warmup" and bool(s.get("reps") or s.get("weight_kg"))
 
 
 def _is_hard(s: dict) -> bool:
