@@ -145,6 +145,7 @@ health-agent/
 |---------------|------------------|-----------------------------------|
 | 09:00 daily   | Healthcheck      | DB + API token verification (silent) |
 | 09:30 daily   | Oura Pull        | Sleep, readiness, activity, HRV, workouts |
+| 09:32 daily   | Hevy Pull        | Lifting sessions + sets, last 3 days |
 | 09:35 daily   | Whoop Pull       | Recovery, strain, sleep            |
 | 09:40 daily   | Supabase Sync    | Push last 7 days to the dashboard  |
 
@@ -187,6 +188,7 @@ Image: `python:3.11-slim`, runs as non-root user `agent`.
 | TELEGRAM_BOT_TOKEN    | Yes      | Telegram bot token from @BotFather   |
 | TELEGRAM_CHAT_ID      | Yes      | Your Telegram chat ID                |
 | OURA_TOKEN            | Yes      | Oura personal access token           |
+| HEVY_API_KEY          | Yes      | Hevy API key (Hevy Pro)              |
 | WHOOP_CLIENT_ID       | Yes      | Whoop OAuth2 client ID               |
 | WHOOP_CLIENT_SECRET   | Yes      | Whoop OAuth2 client secret           |
 | OPENROUTER_API_KEY    | Yes      | OpenRouter API key for LLM           |
