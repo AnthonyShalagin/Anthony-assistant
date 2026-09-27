@@ -3,20 +3,8 @@ import { fetchStrongSets } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
-export default async function StrengthPage() {
-  // 26 weeks gives the priority-lift weighting tiers (4w, 12w, 26w) full
-  // history to differentiate recent vs older work.
+export default async function TrainingPage() {
+  // 26 weeks: enough history for 3-month change on each lift
   const sets = await fetchStrongSets(26);
-  return (
-    <div className="space-y-8">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Strength</h1>
-        <span className="text-xs text-[var(--color-text-faint)]">
-          {sets.length} sets · last 6 mo
-        </span>
-      </div>
-
-      <StrengthClient sets={sets} />
-    </div>
-  );
+  return <StrengthClient sets={sets} />;
 }

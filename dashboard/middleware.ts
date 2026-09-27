@@ -5,7 +5,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/_next", "/favicon.ico", "/403"];
+// Icons and the manifest must load before sign-in so "Add to Home Screen" works
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/_next", "/favicon.ico", "/403", "/manifest.webmanifest", "/icon-", "/apple-icon"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

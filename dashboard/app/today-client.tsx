@@ -1,302 +1,294 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useMemo } from "react";
 import { Card } from "@/components/card";
-import { RecoveryRing } from "@/components/recovery-ring";
-import { SourceMetricCard, type Source } from "@/components/source-metric";
-import { PeriodToggle, type Period } from "@/components/period-toggle";
-import { differenceInDays, formatDistanceToNowStrict, parseISO } from "date-fns";
+import { displayName } from "@/lib/biomarker-info";
+import {
+  STATUS_VAR,
+  avg,
+  daysBetween,
+  isOut,
+  latestPerMarker,
+  recoveryStatus,
+  shortDate,
+  sleepStatus,
+  todayISO,
+  vsBaseline,
+  weekStart,
+  type Status,
+} from "@/lib/health";
+import type { BloodMarker, InBodyScan } from "@/lib/mock";
 
-type DailyMetric = {
+type Day = {
   date: string;
   hrv: number | null;
   rhr: number | null;
-  sleep_score: number | null;
   sleep_hours: number | null;
   steps: number | null;
   recovery_score: number | null;
   strain: number | null;
-  source: string | null;
 };
 
-type InBodyScan = {
-  date: string;
-  weight_lbs: number;
-  bf_pct: number;
-  skeletal_muscle_lbs: number | null;
-};
+type Key = Exclude<keyof Day, "date">;
 
-type Workout = {
-  date: string;
-  exercise: string;
-  workout_name: string | null;
-};
+// Goals from Anthony's health plan
+const LIFTS_PER_WEEK = 2;
+const SLEEP_GOAL = 7.5;
+const STEPS_GOAL = 8000;
+const STALE_AFTER_DAYS = 1;
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-function formatDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
+function latestOf(days: Day[], key: Key): { value: number; date: string } | null {
+  for (let i = days.length - 1; i >= 0; i--) {
+    const v = days[i][key];
+    if (v != null && !isNaN(Number(v)) && Number(v) !== 0) return { value: Number(v), date: days[i].date };
+  }
+  return null;
 }
 
-function avgOf(values: (number | null | undefined)[]): number | null {
-  const ns = values.filter((v): v is number => v != null && !isNaN(Number(v))).map(Number);
-  if (ns.length === 0) return null;
-  return ns.reduce((a, b) => a + b, 0) / ns.length;
+function headline(recovery: Status, sleep: Status): string {
+  if (recovery === "good") return "Recovered. Good day for a hard session.";
+  if (recovery === "watch") return "Middling recovery. Lift, but keep it moderate.";
+  if (recovery === "bad") return "Run down. Rest or take a walk today.";
+  if (sleep === "good") return "Slept well. No recovery score yet today.";
+  if (sleep === "watch" || sleep === "bad") return "Short night. Take it easier today.";
+  return "No new data yet today.";
 }
-
-function sumOf(values: (number | null | undefined)[]): number | null {
-  const ns = values.filter((v): v is number => v != null && !isNaN(Number(v))).map(Number);
-  if (ns.length === 0) return null;
-  return ns.reduce((a, b) => a + b, 0);
-}
-
-const PERIOD_DAYS_MAP: Record<Period, number> = { D: 1, W: 7, M: 30, Y: 365 };
 
 export function TodayClient({
   metrics,
   inbody,
-  lastWorkout,
+  sessionDates,
+  markers,
 }: {
-  metrics: DailyMetric[];
+  metrics: Day[];
   inbody: InBodyScan[];
-  lastWorkout: Workout | null;
+  sessionDates: string[];
+  markers: BloodMarker[];
 }) {
-  const [period, setPeriod] = useState<Period>("D");
+  const today = todayISO();
+  const days = useMemo(() => [...metrics].sort((a, b) => a.date.localeCompare(b.date)), [metrics]);
 
-  const sorted = useMemo(
-    () => [...metrics].sort((a, b) => a.date.localeCompare(b.date)),
-    [metrics]
-  );
+  // Latest value per metric, and whether its source has gone quiet
+  const recovery = latestOf(days, "recovery_score");
+  const sleep = latestOf(days, "sleep_hours");
+  const hrv = latestOf(days, "hrv");
+  const rhr = latestOf(days, "rhr");
+  const strain = latestOf(days, "strain");
+  const steps = latestOf(days, "steps");
 
-  // Compute aggregated value per metric for the selected period
-  const agg = useMemo(() => {
-    const days = PERIOD_DAYS_MAP[period];
-    const slice = sorted.slice(-days);
-    const prev = sorted.slice(-days * 2, -days);
+  const whoopDate = recovery?.date ?? strain?.date ?? null;
+  const ouraDate = [sleep?.date, hrv?.date].filter(Boolean).sort().pop() ?? null;
+  const stale: string[] = [];
+  if (!whoopDate || daysBetween(whoopDate, today) > STALE_AFTER_DAYS)
+    stale.push(whoopDate ? `Whoop hasn't synced since ${shortDate(whoopDate)}.` : "No Whoop data yet.");
+  if (!ouraDate || daysBetween(ouraDate, today) > STALE_AFTER_DAYS)
+    stale.push(ouraDate ? `Oura hasn't synced since ${shortDate(ouraDate)}.` : "No Oura data yet.");
+  const whoopFresh = whoopDate != null && daysBetween(whoopDate, today) <= STALE_AFTER_DAYS;
 
-    const get = (k: keyof DailyMetric) =>
-      avgOf(slice.map((d) => d[k] as number | null));
-    const getPrev = (k: keyof DailyMetric) =>
-      avgOf(prev.map((d) => d[k] as number | null));
-    const getSum = (k: keyof DailyMetric) =>
-      sumOf(slice.map((d) => d[k] as number | null));
-    const getSumPrev = (k: keyof DailyMetric) =>
-      sumOf(prev.map((d) => d[k] as number | null));
+  const recStatus = whoopFresh ? recoveryStatus(recovery?.value ?? null) : "none";
+  const slpStatus = sleepStatus(sleep?.value ?? null);
 
-    const stepsCurrent = period === "D" ? get("steps") : getSum("steps") != null && slice.length > 0 ? (getSum("steps") as number) / slice.length : null;
-    const stepsPrev = period === "D" ? getPrev("steps") : getSumPrev("steps") != null && prev.length > 0 ? (getSumPrev("steps") as number) / prev.length : null;
+  const last30 = days.slice(-31, -1);
+  const hrvVs = vsBaseline(hrv?.value ?? null, avg(last30.map((d) => d.hrv)));
+  const rhrVs = vsBaseline(rhr?.value ?? null, avg(last30.map((d) => d.rhr)), false);
 
-    return {
-      hrv: { current: get("hrv"), prev: getPrev("hrv") },
-      rhr: { current: get("rhr"), prev: getPrev("rhr") },
-      sleep_score: { current: get("sleep_score"), prev: getPrev("sleep_score") },
-      sleep_hours: { current: get("sleep_hours"), prev: getPrev("sleep_hours") },
-      steps: { current: stepsCurrent, prev: stepsPrev },
-      recovery_score: { current: get("recovery_score"), prev: getPrev("recovery_score") },
-      strain: { current: get("strain"), prev: getPrev("strain") },
-    };
-  }, [sorted, period]);
+  // This week (Monday start)
+  const monday = weekStart(today);
+  const week = days.filter((d) => d.date >= monday);
+  const lifts = sessionDates.filter((d) => d >= monday).length;
+  const rawSleep = avg(week.map((d) => d.sleep_hours));
+  const weekSleep = rawSleep == null ? null : Number(rawSleep.toFixed(1)); // compare what's shown
+  const weekSteps = avg(week.map((d) => d.steps));
+  const lastLift = sessionDates[sessionDates.length - 1];
 
-  // History for inline sparklines — 30 days, regardless of period
-  const sparkSeries = useMemo(() => {
-    const last30 = sorted.slice(-30);
-    return {
-      hrv: last30.map((d) => ({ date: d.date, value: d.hrv })),
-      rhr: last30.map((d) => ({ date: d.date, value: d.rhr })),
-      sleep_score: last30.map((d) => ({ date: d.date, value: d.sleep_score })),
-      sleep_hours: last30.map((d) => ({ date: d.date, value: d.sleep_hours })),
-      steps: last30.map((d) => ({ date: d.date, value: d.steps })),
-      recovery_score: last30.map((d) => ({ date: d.date, value: d.recovery_score })),
-      strain: last30.map((d) => ({ date: d.date, value: d.strain })),
-    };
-  }, [sorted]);
+  const scan = inbody[inbody.length - 1];
+  const showScan = scan && daysBetween(scan.date, today) <= 60;
 
-  const latest = sorted[sorted.length - 1];
-  const latestInBody = inbody[inbody.length - 1];
+  const outOfRange = useMemo(() => latestPerMarker(markers).filter(isOut), [markers]);
 
-  const fmt = (v: number | null, digits = 0): string =>
-    v == null || isNaN(v) ? "—" : Number(v).toFixed(digits);
-  const fmtInt = (v: number | null): string =>
-    v == null || isNaN(v) ? "—" : Math.round(Number(v)).toLocaleString();
-
-  const delta = (
-    cur: number | null,
-    prv: number | null,
-    digits = 1,
-    lowerIsBetter = false
-  ) => {
-    if (cur == null || prv == null) return null;
-    const d = cur - prv;
-    if (Math.abs(d) < 0.01) return null;
-    return {
-      value: `${d > 0 ? "+" : ""}${d.toFixed(digits)}`,
-      positive: lowerIsBetter ? d < 0 : d > 0,
-    };
-  };
-
-  const recoveryValue =
-    period === "D"
-      ? Math.round(latest?.recovery_score ?? 0)
-      : Math.round(agg.recovery_score.current ?? 0);
-
-  const strainValue =
-    period === "D"
-      ? latest?.strain ?? 0
-      : agg.strain.current ?? 0;
-
-  const periodLabel: Record<Period, string> = {
-    D: "Today",
-    W: "Last 7 days · avg",
-    M: "Last 30 days · avg",
-    Y: "Last 365 days · avg",
-  };
-
-  const lastSyncedAgo = latest ? formatDistanceToNowStrict(parseISO(latest.date), { addSuffix: true }) : "—";
-  const lastWorkoutAgo = lastWorkout
-    ? `${differenceInDays(new Date(), parseISO(lastWorkout.date))}d ago`
-    : "—";
+  const now = new Date();
+  const dateLine = `${WEEKDAYS[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()}`;
+  const basis = [
+    recStatus !== "none" && recovery ? `Whoop recovery ${Math.round(recovery.value)}%` : null,
+    sleep ? `${sleep.value.toFixed(1)} h of sleep` : null,
+  ].filter(Boolean);
 
   return (
-    <div className="space-y-8">
-      {/* HEADER: period toggle + status pills */}
-      <div className="flex flex-wrap items-center gap-3">
-        <PeriodToggle value={period} onChange={setPeriod} />
-        <span className="text-xs text-[var(--color-text-faint)]">
-          {periodLabel[period]}
-        </span>
-        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-          <Pill label="Last synced" value={lastSyncedAgo} dotColor="var(--color-recovery)" />
-          {lastWorkout && (
-            <Pill
-              label="Last lift"
-              value={`${lastWorkout.exercise} · ${lastWorkoutAgo}`}
-              dotColor="var(--color-strain)"
+    <div className="mx-auto max-w-3xl space-y-6">
+      {/* Summary first: one sentence you can act on */}
+      <header>
+        <p className="text-[13px] font-medium text-[var(--color-text-dim)]">{dateLine}</p>
+        <h1 className="mt-1 text-[28px] font-semibold leading-tight tracking-[-0.02em] sm:text-[34px]">
+          {headline(recStatus, slpStatus)}
+        </h1>
+        {basis.length > 0 && (
+          <p className="mt-2 text-[15px] text-[var(--color-text-dim)]">Based on {basis.join(" and ")}.</p>
+        )}
+        {stale.map((s) => (
+          <p key={s} className="mt-1 text-[13px] font-medium" style={{ color: STATUS_VAR.watch }}>
+            {s} Numbers below may be old.
+          </p>
+        ))}
+      </header>
+
+      {/* Three numbers that matter this morning */}
+      <section className="grid grid-cols-3 gap-3">
+        <Stat
+          label="Recovery"
+          value={recovery ? `${Math.round(recovery.value)}` : "–"}
+          unit="%"
+          status={recStatus}
+          word={{ good: "Ready", watch: "Moderate", bad: "Low", none: "No data" }[recStatus]}
+        />
+        <Stat
+          label="Sleep"
+          value={sleep ? sleep.value.toFixed(1) : "–"}
+          unit="h"
+          status={slpStatus}
+          word={{ good: "Enough", watch: "A bit short", bad: "Short", none: "No data" }[slpStatus]}
+        />
+        <Stat
+          label="HRV"
+          value={hrv ? `${Math.round(hrv.value)}` : "–"}
+          unit="ms"
+          status={hrvVs.status}
+          word={hrvVs.word || "No data"}
+        />
+      </section>
+      <p className="-mt-3 text-[13px] leading-snug text-[var(--color-text-dim)]">
+        HRV is heart rate variability: higher usually means your body has recovered. It&apos;s compared with your
+        own 30-day average, not other people&apos;s.
+      </p>
+
+      {/* This week vs the plan */}
+      <Card title="This week" hint={`Since Monday, ${shortDate(monday)}`}>
+        <ul className="divide-y divide-[var(--color-border)]">
+          <WeekRow
+            label="Lifts"
+            value={`${lifts} this week · goal ${LIFTS_PER_WEEK}`}
+            status={lifts >= LIFTS_PER_WEEK ? "good" : "watch"}
+            word={lifts >= LIFTS_PER_WEEK ? "Done" : `${LIFTS_PER_WEEK - lifts} to go`}
+          />
+          <WeekRow
+            label="Sleep"
+            value={weekSleep ? `${weekSleep.toFixed(1)} h a night` : "–"}
+            status={weekSleep == null ? "none" : weekSleep >= SLEEP_GOAL ? "good" : "watch"}
+            word={weekSleep == null ? "No data" : weekSleep >= SLEEP_GOAL ? "On goal" : `Under ${SLEEP_GOAL} h goal`}
+          />
+          <WeekRow
+            label="Steps"
+            value={weekSteps ? `${Math.round(weekSteps).toLocaleString()} a day` : "–"}
+            status={weekSteps == null ? "none" : weekSteps >= STEPS_GOAL ? "good" : "watch"}
+            word={weekSteps == null ? "No data" : weekSteps >= STEPS_GOAL ? "On goal" : `Under ${STEPS_GOAL.toLocaleString()} goal`}
+          />
+        </ul>
+      </Card>
+
+      {/* Only when something needs a look */}
+      {outOfRange.length > 0 && (
+        <Card
+          title={`${outOfRange.length} lab result${outOfRange.length > 1 ? "s" : ""} out of range`}
+          hint={`Latest panel ${shortDate(outOfRange[0].panel_date)}`}
+        >
+          <ul className="space-y-1.5 text-[15px]">
+            {outOfRange.slice(0, 3).map((m) => (
+              <li key={m.marker} className="flex items-baseline justify-between gap-3">
+                <span className="truncate">{displayName(m.marker)}</span>
+                <span className="shrink-0 tabular-nums">
+                  {m.value} {m.unit}{" "}
+                  <span className="font-medium" style={{ color: STATUS_VAR.bad }}>
+                    {m.status === "high" ? "High" : "Low"}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Link href="/bloodwork" className="mt-3 inline-block text-[15px] font-medium text-[var(--color-neutral)]">
+            Review labs
+          </Link>
+        </Card>
+      )}
+
+      {/* Secondary detail, one line each */}
+      <Card title="More from today">
+        <ul className="divide-y divide-[var(--color-border)] text-[15px]">
+          <DetailRow
+            label="Resting heart rate"
+            value={rhr ? `${Math.round(rhr.value)} bpm` : "–"}
+            note={rhrVs.word ? `${rhrVs.word} · Oura` : "Oura"}
+            status={rhrVs.status}
+          />
+          <DetailRow
+            label="Strain"
+            value={strain ? strain.value.toFixed(1) : "–"}
+            note="Day's effort, 0 to 21 · Whoop"
+          />
+          <DetailRow label="Steps" value={steps ? Math.round(steps.value).toLocaleString() : "–"} note={steps ? `${shortDate(steps.date)} · Oura` : "Oura"} />
+          <DetailRow label="Last lift" value={lastLift ? shortDate(lastLift) : "None logged"} note="Hevy" />
+          {showScan && (
+            <DetailRow
+              label="Body scan"
+              value={`${scan.weight_lbs.toFixed(1)} lb · ${scan.bf_pct.toFixed(1)}% fat`}
+              note={`InBody, ${shortDate(scan.date)}`}
             />
           )}
-        </div>
-      </div>
-
-      {/* HERO: Recovery + summary metrics */}
-      <section className="grid gap-6 lg:grid-cols-[auto_1fr]">
-        <Card className="flex flex-col items-center justify-center bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-surface-2)]">
-          <RecoveryRing value={recoveryValue} />
-          <div className="mt-4 text-center">
-            <div className="text-xs uppercase tracking-[0.25em] text-[var(--color-text-faint)]">
-              Strain
-            </div>
-            <div className="metric-num mt-1 text-2xl font-semibold text-[var(--color-strain)]">
-              {fmt(strainValue, 1)}
-            </div>
-          </div>
-        </Card>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <SourceMetricCard
-            label="HRV"
-            value={fmt(agg.hrv.current, 0)}
-            unit="ms"
-            accent="var(--color-recovery)"
-            source="OURA"
-            delta={delta(agg.hrv.current, agg.hrv.prev, 0)}
-            hint="vs prev period"
-            history={sparkSeries.hrv}
-          />
-          <SourceMetricCard
-            label="Resting HR"
-            value={fmt(agg.rhr.current, 0)}
-            unit="bpm"
-            accent="var(--color-alert)"
-            source="WHOOP"
-            delta={delta(agg.rhr.current, agg.rhr.prev, 0, true)}
-            hint="vs prev period"
-            history={sparkSeries.rhr}
-          />
-          <SourceMetricCard
-            label="Sleep"
-            value={fmt(agg.sleep_hours.current, 1)}
-            unit="hr"
-            accent="var(--color-sleep)"
-            source="OURA"
-            delta={delta(agg.sleep_hours.current, agg.sleep_hours.prev, 1)}
-            hint={
-              agg.sleep_score.current != null
-                ? `score ${Math.round(agg.sleep_score.current)}`
-                : undefined
-            }
-            history={sparkSeries.sleep_hours}
-          />
-          <SourceMetricCard
-            label="Steps"
-            value={fmtInt(agg.steps.current)}
-            accent="var(--color-strain)"
-            source="OURA"
-            delta={delta(agg.steps.current, agg.steps.prev, 0)}
-            hint={period === "D" ? "today" : "daily avg"}
-            history={sparkSeries.steps}
-          />
-          <SourceMetricCard
-            label="Weight"
-            value={fmt(latestInBody?.weight_lbs ?? null, 1)}
-            unit="lbs"
-            source="INBODY"
-            hint={latestInBody ? `scan ${formatDate(latestInBody.date)}` : undefined}
-          />
-          <SourceMetricCard
-            label="Body Fat"
-            value={fmt(latestInBody?.bf_pct ?? null, 1)}
-            unit="%"
-            accent="var(--color-warn)"
-            source="INBODY"
-            hint={
-              latestInBody?.skeletal_muscle_lbs != null
-                ? `SMM ${latestInBody.skeletal_muscle_lbs.toFixed(1)} lbs`
-                : undefined
-            }
-          />
-        </div>
-      </section>
-
-      {/* SECONDARY: Recovery + Strain charts (Whoop) */}
-      <section className="grid gap-4 lg:grid-cols-2">
-        <SourceMetricCard
-          label="Recovery"
-          value={fmt(agg.recovery_score.current, 0)}
-          unit="%"
-          accent="var(--color-recovery)"
-          source="WHOOP"
-          delta={delta(agg.recovery_score.current, agg.recovery_score.prev, 0)}
-          hint="vs prev period"
-          history={sparkSeries.recovery_score}
-        />
-        <SourceMetricCard
-          label="Daily Strain"
-          value={fmt(agg.strain.current, 1)}
-          accent="var(--color-strain)"
-          source="WHOOP"
-          delta={delta(agg.strain.current, agg.strain.prev, 1)}
-          hint="0–21 scale"
-          history={sparkSeries.strain}
-        />
-      </section>
+        </ul>
+        <Link href="/trends" className="mt-3 inline-block text-[15px] font-medium text-[var(--color-neutral)]">
+          See trends
+        </Link>
+      </Card>
     </div>
   );
 }
 
-function Pill({
-  label,
-  value,
-  dotColor,
-}: {
-  label: string;
-  value: string;
-  dotColor: string;
-}) {
+function Stat({ label, value, unit, status, word }: { label: string; value: string; unit: string; status: Status; word: string }) {
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: dotColor }} />
-      <span className="text-[var(--color-text-faint)]">{label}</span>
-      <span className="text-[var(--color-text)] tabular-nums">{value}</span>
-    </span>
+    <Link
+      href="/trends"
+      className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 transition-colors hover:bg-[var(--color-surface-2)] sm:p-4"
+    >
+      <div className="text-[13px] text-[var(--color-text-dim)]">{label}</div>
+      <div className="mt-1 flex items-baseline gap-0.5">
+        <span className="metric-num text-[26px] font-semibold leading-none sm:text-[32px]">{value}</span>
+        {value !== "–" && <span className="text-[13px] text-[var(--color-text-dim)]">{unit}</span>}
+      </div>
+      <div className="mt-2 flex items-center gap-1.5 text-[13px] font-medium" style={{ color: STATUS_VAR[status] }}>
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_VAR[status] }} />
+        <span className="truncate">{word}</span>
+      </div>
+    </Link>
+  );
+}
+
+function WeekRow({ label, value, status, word }: { label: string; value: string; status: Status; word: string }) {
+  return (
+    <li className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+      <div>
+        <div className="text-[15px]">{label}</div>
+        <div className="metric-num text-[13px] text-[var(--color-text-dim)]">{value}</div>
+      </div>
+      <span className="flex items-center gap-1.5 text-[13px] font-medium" style={{ color: STATUS_VAR[status] }}>
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: STATUS_VAR[status] }} />
+        {word}
+      </span>
+    </li>
+  );
+}
+
+function DetailRow({ label, value, note, status }: { label: string; value: string; note: string; status?: Status }) {
+  return (
+    <li className="flex items-baseline justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+      <div className="min-w-0">
+        <div>{label}</div>
+        <div className="truncate text-[13px]" style={{ color: status && status !== "good" ? STATUS_VAR[status] : "var(--color-text-dim)" }}>
+          {note}
+        </div>
+      </div>
+      <span className="metric-num shrink-0 font-medium">{value}</span>
+    </li>
   );
 }

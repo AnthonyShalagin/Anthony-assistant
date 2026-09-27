@@ -2,95 +2,82 @@
 
 import { useMemo, useState } from "react";
 import { Card } from "@/components/card";
-import { TrendArea, TrendLine, BarSeries } from "@/components/charts";
-import { PeriodToggle, type Period } from "@/components/period-toggle";
+import { TrendChart } from "@/components/charts";
+import { cn } from "@/lib/cn";
+import { avg } from "@/lib/health";
 
 type DailyMetric = {
   date: string;
   hrv: number | null;
   rhr: number | null;
-  sleep_score: number | null;
   sleep_hours: number | null;
   steps: number | null;
   recovery_score: number | null;
   strain: number | null;
 };
+type Key = Exclude<keyof DailyMetric, "date">;
 
-const PERIOD_DAYS_MAP: Record<Period, number> = { D: 14, W: 60, M: 180, Y: 365 };
+const RANGES = [
+  { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+  { label: "1 year", days: 365 },
+];
+
+// One source per metric, never mixed (see health-agent/supabase_sync.py)
+const METRICS: { key: Key; title: string; unit: string; digits: number; source: string; about: string; goal?: number }[] = [
+  { key: "recovery_score", title: "Recovery", unit: "%", digits: 0, source: "Whoop", about: "How ready your body is. 67% and up is good." },
+  { key: "sleep_hours", title: "Sleep", unit: "h", digits: 1, source: "Oura", about: "Time asleep. Your goal is 7.5 hours.", goal: 7.5 },
+  { key: "hrv", title: "HRV", unit: "ms", digits: 0, source: "Oura", about: "Heart rate variability. Higher usually means better recovered." },
+  { key: "rhr", title: "Resting heart rate", unit: "bpm", digits: 0, source: "Oura", about: "Lowest heart rate overnight. Lower is usually fitter." },
+  { key: "steps", title: "Steps", unit: "steps", digits: 0, source: "Oura", about: "Your goal is 8,000 a day.", goal: 8000 },
+  { key: "strain", title: "Strain", unit: "", digits: 1, source: "Whoop", about: "The day's total effort, on a 0 to 21 scale." },
+];
 
 export function TrendsClient({ metrics }: { metrics: DailyMetric[] }) {
-  const [period, setPeriod] = useState<Period>("M");
-
-  const sorted = useMemo(
-    () => [...metrics].sort((a, b) => a.date.localeCompare(b.date)),
-    [metrics]
+  const [days, setDays] = useState(90);
+  const slice = useMemo(
+    () => [...metrics].sort((a, b) => a.date.localeCompare(b.date)).slice(-days),
+    [metrics, days]
   );
 
-  // Coerce nulls to 0 for the chart components (their generic Datum type
-  // doesn't accept null). The chart still skips zero-only days visually.
-  const slice = useMemo(() => {
-    return sorted.slice(-PERIOD_DAYS_MAP[period]).map((d) => ({
-      date: d.date,
-      hrv: d.hrv ?? 0,
-      rhr: d.rhr ?? 0,
-      sleep_score: d.sleep_score ?? 0,
-      sleep_hours: d.sleep_hours ?? 0,
-      steps: d.steps ?? 0,
-      recovery_score: d.recovery_score ?? 0,
-      strain: d.strain ?? 0,
-    }));
-  }, [sorted, period]);
-
-  const avg = (key: keyof Omit<DailyMetric, "date">) => {
-    const ns = slice
-      .map((d) => d[key] as number)
-      .filter((v) => v > 0 && !isNaN(v));
-    if (ns.length === 0) return "—";
-    return Math.round((ns.reduce((a, b) => a + b, 0) / ns.length) * 10) / 10;
-  };
-
-  const periodLabel: Record<Period, string> = {
-    D: "Last 14 days",
-    W: "Last 60 days",
-    M: "Last 180 days",
-    Y: "Last 365 days",
-  };
-
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto max-w-3xl space-y-6">
+      <header className="space-y-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Trends</h1>
-          <p className="mt-1 text-xs text-[var(--color-text-faint)]">
-            {periodLabel[period]} · {slice.length} days of data
+          <h1 className="text-[28px] font-semibold tracking-[-0.02em] sm:text-[34px]">Trends</h1>
+          <p className="mt-1 text-[15px] text-[var(--color-text-dim)]">
+            Dots are single days. The line is your 7-day average, which shows the real direction.
           </p>
         </div>
-        <PeriodToggle value={period} onChange={setPeriod} />
-      </div>
+        <div className="inline-flex rounded-full bg-[var(--color-surface-2)] p-0.5" role="tablist" aria-label="Time range">
+          {RANGES.map((r) => (
+            <button
+              key={r.days}
+              role="tab"
+              aria-selected={days === r.days}
+              onClick={() => setDays(r.days)}
+              className={cn(
+                "rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+                days === r.days ? "bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm" : "text-[var(--color-text-dim)]"
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </header>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <Card title="HRV (ms)" hint={`avg ${avg("hrv")} ms`}>
-          <TrendArea data={slice} dataKey="hrv" color="var(--color-recovery)" unit="ms" height={220} />
-        </Card>
-        <Card title="Resting HR (bpm)" hint={`avg ${avg("rhr")} bpm`}>
-          <TrendLine data={slice} dataKey="rhr" color="var(--color-alert)" unit="bpm" height={220} />
-        </Card>
-        <Card title="Sleep (hours)" hint={`avg ${avg("sleep_hours")} h`}>
-          <TrendArea data={slice} dataKey="sleep_hours" color="var(--color-sleep)" unit="h" height={220} />
-        </Card>
-        <Card title="Sleep Score" hint={`avg ${avg("sleep_score")}`}>
-          <TrendLine data={slice} dataKey="sleep_score" color="var(--color-sleep)" height={220} />
-        </Card>
-        <Card title="Steps" hint={`avg ${typeof avg("steps") === "number" ? Number(avg("steps")).toLocaleString() : avg("steps")}`}>
-          <BarSeries data={slice} dataKey="steps" color="var(--color-strain)" height={220} />
-        </Card>
-        <Card title="Recovery Score" hint={`avg ${avg("recovery_score")}`}>
-          <TrendArea data={slice} dataKey="recovery_score" color="var(--color-recovery)" height={220} />
-        </Card>
-        <Card title="Strain" hint={`avg ${avg("strain")}`}>
-          <TrendArea data={slice} dataKey="strain" color="var(--color-strain)" height={220} />
-        </Card>
-      </section>
+      {METRICS.map((m) => {
+        const points = slice.map((d) => ({ date: d.date, value: d[m.key] == null || d[m.key] === 0 ? null : Number(d[m.key]) }));
+        const mean = avg(points.map((p) => p.value));
+        if (mean == null) return null; // nothing to show for this source yet
+        return (
+          <Card key={m.key} title={m.title} hint={`${m.source} · average ${mean.toLocaleString(undefined, { minimumFractionDigits: m.digits, maximumFractionDigits: m.digits })}${m.unit === "%" ? "%" : m.unit && m.unit !== "steps" ? ` ${m.unit}` : ""}`}>
+            <p className="-mt-2 mb-3 text-[13px] text-[var(--color-text-dim)]">{m.about}</p>
+            <TrendChart points={points} unit={m.unit} digits={m.digits} goal={m.goal} />
+          </Card>
+        );
+      })}
     </div>
   );
 }

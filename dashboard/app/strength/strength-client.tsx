@@ -2,480 +2,198 @@
 
 import { useMemo, useState } from "react";
 import { Card } from "@/components/card";
+import { TrendChart } from "@/components/charts";
+import { cn } from "@/lib/cn";
+import { STATUS_VAR, daysBetween, shortDate, todayISO, weekStart, type Status } from "@/lib/health";
 import type { StrongSet } from "@/lib/mock";
-import { differenceInDays, format, parseISO, startOfWeek } from "date-fns";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
-const AXIS = "#6b6b6b";
-const GRID = "#262626";
-const tooltipStyle = {
-  background: "#141414",
-  border: "1px solid #262626",
-  borderRadius: 8,
-  fontSize: 12,
-  color: "#f5f5f5",
-};
+const LIFTS_PER_WEEK = 2;
+const WEEKS = 12;
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Cardio and stretching aren't strength lifts
+const NON_STRENGTH = new Set(["Treadmill", "Stairmaster", "Running", "Cycling", "Rowing Machine", "Elliptical", "Walk", "Stretching", "Warm Up"]);
 
-/** "2026-04-23" -> "Apr 23, 2026" */
-function formatLiftDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
-}
-
-/** "2026-04-23" -> "Apr 23" — for tight chart axes */
-function formatChartTick(iso: string): string {
-  const [, m, d] = iso.split("-");
-  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`;
-}
-
-const PRIORITY_COLORS = [
-  "var(--color-recovery)",
-  "var(--color-strain)",
-  "var(--color-sleep)",
-  "var(--color-warn)",
-  "var(--color-alert)",
-  "#a1a1a1",
-  "#7dd3fc",
-  "#fb7185",
-];
-
-// Skip cardio + carry-style movements when computing strength PRs / priority lifts
-const NON_STRENGTH = new Set([
-  "Treadmill",
-  "Stairmaster",
-  "Running",
-  "Cycling",
-  "Rowing Machine",
-  "Elliptical",
-  "Walk",
-  "Stretching",
-]);
+type Session = { date: string; exercises: number; sets: number };
+type LiftDay = { date: string; e1rm: number; topWeight: number; topReps: number };
 
 export function StrengthClient({ sets }: { sets: StrongSet[] }) {
-  const today = useMemo(() => {
-    if (sets.length === 0) return new Date();
-    return parseISO(sets.reduce((m, s) => (s.date > m ? s.date : m), sets[0].date));
-  }, [sets]);
+  const today = todayISO();
+  const [selected, setSelected] = useState<string | null>(null);
 
-  // ---------- Priority score per exercise ----------
-  // Recency-weighted: a set in the last 4 weeks counts 4x, last 12 weeks 2x,
-  // last 26 weeks 1x, anything older 0.3x. Higher = more relevant.
-  const priorityScore = useMemo(() => {
-    const score = new Map<string, number>();
+  const sessions = useMemo<Session[]>(() => {
+    const byDate = new Map<string, { ex: Set<string>; sets: number }>();
     for (const s of sets) {
-      if (NON_STRENGTH.has(s.exercise)) continue;
-      const days = differenceInDays(today, parseISO(s.date));
-      let w: number;
-      if (days <= 28) w = 4;
-      else if (days <= 84) w = 2;
-      else if (days <= 182) w = 1;
-      else w = 0.3;
-      score.set(s.exercise, (score.get(s.exercise) ?? 0) + w);
-    }
-    return score;
-  }, [sets, today]);
-
-  const orderedExercises = useMemo(() => {
-    return [...priorityScore.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([name]) => name);
-  }, [priorityScore]);
-
-  const topLifts = useMemo(() => orderedExercises.slice(0, 6), [orderedExercises]);
-
-  const [exercise, setExercise] = useState(orderedExercises[0] ?? "Bench Press");
-
-  // Map exercise -> sorted history of {date, top weight, top e1rm, sets, last_seen}
-  const historyByExercise = useMemo(() => {
-    const m = new Map<
-      string,
-      { date: string; top_weight: number; top_e1rm: number; sets: number }[]
-    >();
-    const tmp = new Map<string, Map<string, { w: number; r: number; e1rm: number; sets: number }>>();
-
-    for (const s of sets) {
-      const ex = s.exercise;
-      if (!tmp.has(ex)) tmp.set(ex, new Map());
-      const day = tmp.get(ex)!;
-      const cur = day.get(s.date) ?? { w: 0, r: 0, e1rm: 0, sets: 0 };
-      cur.sets += 1;
-      if (s.weight_lbs > cur.w) cur.w = s.weight_lbs;
-      if (s.e1rm > cur.e1rm) cur.e1rm = s.e1rm;
-      day.set(s.date, cur);
-    }
-
-    for (const [ex, day] of tmp.entries()) {
-      const arr = [...day.entries()]
-        .map(([date, v]) => ({
-          date,
-          top_weight: v.w,
-          top_e1rm: v.e1rm,
-          sets: v.sets,
-        }))
-        .sort((a, b) => a.date.localeCompare(b.date));
-      m.set(ex, arr);
-    }
-    return m;
-  }, [sets]);
-
-  // ---------- Per-exercise selected progress ----------
-  const exerciseProgress = useMemo(() => {
-    return historyByExercise.get(exercise) ?? [];
-  }, [historyByExercise, exercise]);
-
-  // ---------- Top 4 e1RM trend (the user's actual most-relevant lifts) ----------
-  const e1rmTrend = useMemo(() => {
-    const tracked = topLifts.slice(0, 4);
-    const byDate = new Map<string, Record<string, number>>();
-    for (const s of sets) {
-      if (!tracked.includes(s.exercise)) continue;
-      const row = byDate.get(s.date) ?? {};
-      if ((row[s.exercise] ?? 0) < s.e1rm) row[s.exercise] = s.e1rm;
-      byDate.set(s.date, row);
+      const d = byDate.get(s.date) ?? { ex: new Set(), sets: 0 };
+      d.ex.add(s.exercise);
+      d.sets += 1;
+      byDate.set(s.date, d);
     }
     return [...byDate.entries()]
-      .map(([date, vals]) => ({ date, ...vals }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [sets, topLifts]);
-
-  // ---------- Weekly volume by muscle group ----------
-  const weeklyVolume = useMemo(() => {
-    const byWeek = new Map<string, Record<string, number>>();
-    for (const s of sets) {
-      const wk = format(startOfWeek(parseISO(s.date), { weekStartsOn: 1 }), "yyyy-MM-dd");
-      const row = byWeek.get(wk) ?? {};
-      const vol = s.weight_lbs * s.reps;
-      row[s.muscle_group] = (row[s.muscle_group] ?? 0) + vol;
-      byWeek.set(wk, row);
-    }
-    return [...byWeek.entries()]
-      .map(([date, vals]) => ({ date, ...vals }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .map(([date, v]) => ({ date, exercises: v.ex.size, sets: v.sets }))
+      .sort((a, b) => b.date.localeCompare(a.date));
   }, [sets]);
 
+  // Lifts per week for the last 12 weeks, oldest first
+  const weeks = useMemo(() => {
+    const thisWeek = weekStart(today);
+    return Array.from({ length: WEEKS }, (_, i) => {
+      const d = new Date(thisWeek + "T12:00:00");
+      d.setDate(d.getDate() - (WEEKS - 1 - i) * 7);
+      const start = d.toISOString().slice(0, 10);
+      return { start, count: sessions.filter((s) => weekStart(s.date) === start).length };
+    });
+  }, [sessions, today]);
+  const thisWeek = weeks[weeks.length - 1].count;
+  const hitWeeks = weeks.slice(0, -1).slice(-4).filter((w) => w.count >= LIFTS_PER_WEEK).length;
+
+  // Per-lift history: best estimated 1RM (or top reps for bodyweight) each session
+  const lifts = useMemo(() => {
+    const score = new Map<string, number>();
+    const days = new Map<string, Map<string, LiftDay>>();
+    for (const s of sets) {
+      if (NON_STRENGTH.has(s.exercise)) continue;
+      const age = daysBetween(s.date, today);
+      score.set(s.exercise, (score.get(s.exercise) ?? 0) + (age <= 28 ? 4 : age <= 84 ? 2 : 1));
+      const byDate = days.get(s.exercise) ?? new Map<string, LiftDay>();
+      const cur = byDate.get(s.date) ?? { date: s.date, e1rm: 0, topWeight: 0, topReps: 0 };
+      cur.e1rm = Math.max(cur.e1rm, s.e1rm || 0);
+      cur.topWeight = Math.max(cur.topWeight, s.weight_lbs || 0);
+      cur.topReps = Math.max(cur.topReps, s.reps || 0);
+      byDate.set(s.date, cur);
+      days.set(s.exercise, byDate);
+    }
+    return [...score.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name]) => {
+        const history = [...days.get(name)!.values()].sort((a, b) => a.date.localeCompare(b.date));
+        const bodyweight = history.every((h) => h.topWeight === 0);
+        const metric = (h: LiftDay) => (bodyweight ? h.topReps : h.e1rm);
+        const latest = history[history.length - 1];
+        const past = history.filter((h) => daysBetween(h.date, latest.date) >= 80);
+        const base = past.length ? metric(past[past.length - 1]) : null;
+        const change = base ? ((metric(latest) - base) / base) * 100 : null;
+        return { name, history, bodyweight, latest, change, metric };
+      });
+  }, [sets, today]);
+
+  const active = lifts.find((l) => l.name === (selected ?? lifts[0]?.name));
+  const last = sessions[0];
+
+  if (sessions.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <h1 className="text-[28px] font-semibold sm:text-[34px]">Training</h1>
+        <p className="mt-2 text-[15px] text-[var(--color-text-dim)]">No Hevy sessions in the last few months.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8">
-      {/* ============= PRIORITY LIFTS ============= */}
-      <section>
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-text-dim)]">
-            Priority Lifts
-          </h2>
-          <span className="text-[10px] text-[var(--color-text-faint)]">
-            ranked by recent frequency · last 6 months weighted heavier
-          </span>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {topLifts.map((name, i) => (
-            <PriorityLiftCard
-              key={name}
-              name={name}
-              history={historyByExercise.get(name) ?? []}
-              today={today}
-              color={PRIORITY_COLORS[i % PRIORITY_COLORS.length]}
-              onSelect={() => setExercise(name)}
-            />
+    <div className="mx-auto max-w-3xl space-y-6">
+      <header>
+        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] sm:text-[34px]">
+          {thisWeek >= LIFTS_PER_WEEK
+            ? `${thisWeek} lifts this week. Goal met.`
+            : `${thisWeek} of ${LIFTS_PER_WEEK} lifts this week`}
+        </h1>
+        <p className="mt-1 text-[15px] text-[var(--color-text-dim)]">
+          Hit the goal {hitWeeks} of the last 4 weeks · last lift {shortDate(last.date)}
+          {daysBetween(last.date, today) >= 4 && (
+            <span style={{ color: STATUS_VAR.watch }}> ({daysBetween(last.date, today)} days ago)</span>
+          )}
+        </p>
+      </header>
+
+      <Card title="Lifts per week" hint={`Goal ${LIFTS_PER_WEEK}`}>
+        <div className="relative flex h-28 items-end gap-1.5 sm:gap-2">
+          <div
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed"
+            style={{ bottom: `${(LIFTS_PER_WEEK / 4) * 100}%`, borderColor: "var(--color-good)" }}
+            aria-hidden
+          />
+          {weeks.map((w, i) => (
+            <div key={w.start} className="flex h-full flex-1 flex-col items-center justify-end" title={`Week of ${shortDate(w.start)}: ${w.count} lifts`}>
+              <div
+                className={cn("w-full max-w-7 rounded-md", i === weeks.length - 1 && "opacity-60")}
+                style={{
+                  height: `${(Math.min(w.count, 4) / 4) * 100}%`,
+                  minHeight: w.count ? 6 : 2,
+                  background: w.count >= LIFTS_PER_WEEK ? "var(--color-good)" : w.count ? "var(--color-chart)" : "var(--color-surface-2)",
+                }}
+              />
+            </div>
           ))}
+        </div>
+        <div className="mt-2 flex justify-between text-[11px] text-[var(--color-text-dim)]">
+          <span>{shortDate(weeks[0].start)}</span>
+          <span>This week</span>
+        </div>
+      </Card>
+
+      <Card title="Recent sessions">
+        <ul className="divide-y divide-[var(--color-border)]">
+          {sessions.slice(0, 5).map((s) => {
+            const d = new Date(s.date + "T12:00:00");
+            return (
+              <li key={s.date} className="flex items-baseline justify-between gap-3 py-2.5 text-[15px] first:pt-0 last:pb-0">
+                <span>
+                  {WEEKDAYS[d.getDay()]}, {shortDate(s.date)}
+                </span>
+                <span className="text-[13px] text-[var(--color-text-dim)]">
+                  {s.exercises} exercises · {s.sets} sets
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+
+      <section>
+        <h2 className="text-[17px] font-semibold">Main lifts</h2>
+        <p className="mt-1 text-[13px] text-[var(--color-text-dim)]">
+          Estimated 1-rep max: the most you could lift once, worked out from your sets. Change is over the last 3
+          months. Select a lift to see its history.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {lifts.map((l) => {
+            const status: Status = l.change == null ? "none" : l.change >= 1 ? "good" : l.change <= -5 ? "bad" : "watch";
+            const isActive = active?.name === l.name;
+            return (
+              <button
+                key={l.name}
+                onClick={() => setSelected(l.name)}
+                aria-pressed={isActive}
+                className={cn(
+                  "rounded-2xl border bg-[var(--color-surface)] p-3 text-left transition-colors sm:p-4",
+                  isActive ? "border-[var(--color-text)]" : "border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+                )}
+              >
+                <div className="truncate text-[13px] text-[var(--color-text-dim)]">{l.name}</div>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span className="metric-num text-[26px] font-semibold leading-none">
+                    {Math.round(l.metric(l.latest))}
+                  </span>
+                  <span className="text-[13px] text-[var(--color-text-dim)]">{l.bodyweight ? "reps" : "lb"}</span>
+                </div>
+                <div className="mt-2 text-[13px] font-medium" style={{ color: STATUS_VAR[status] }}>
+                  {l.change == null ? "New lift" : `${l.change > 0 ? "+" : ""}${l.change.toFixed(0)}% in 3 months`}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </section>
 
-      {/* ============= e1RM TREND ============= */}
-      <Card
-        title="Estimated 1RM — Top Lifts"
-        hint="Epley formula · top 4 by recency"
-      >
-        <E1RMChart data={e1rmTrend} lifts={topLifts.slice(0, 4)} />
-      </Card>
-
-      {/* ============= PER-EXERCISE PROGRESS ============= */}
-      <Card title="Per-Exercise Progress" hint="Estimated 1RM trend">
-        <div className="mb-4 flex flex-wrap gap-1">
-          {orderedExercises.map((e) => (
-            <button
-              key={e}
-              onClick={() => setExercise(e)}
-              className={`rounded px-2.5 py-1 text-xs transition-colors ${
-                e === exercise
-                  ? "bg-[var(--color-strain)] text-black"
-                  : "bg-[var(--color-surface-2)] text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              {e}
-            </button>
-          ))}
-        </div>
-        {exerciseProgress.length > 0 ? (
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart
-              data={exerciseProgress}
-              margin={{ top: 16, right: 16, left: -8, bottom: 4 }}
-            >
-              <CartesianGrid stroke={GRID} vertical={false} />
-              <XAxis
-                dataKey="date"
-                stroke={AXIS}
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={formatChartTick}
-                minTickGap={32}
-                tickMargin={6}
-              />
-              <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={40} />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                cursor={{ stroke: GRID }}
-                labelFormatter={(v) => (typeof v === "string" ? formatLiftDate(v) : "")}
-                formatter={(value, key) => [
-                  `${Math.round(Number(value))} lbs`,
-                  key === "top_e1rm" ? "Est. 1RM" : "Top set",
-                ] as [string, string]}
-              />
-              <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1a1" }} iconType="line" />
-              <Line
-                type="monotone"
-                dataKey="top_e1rm"
-                name="Est. 1RM"
-                stroke="var(--color-recovery)"
-                strokeWidth={2.5}
-                dot={{ r: 3, fill: "var(--color-recovery)" }}
-                activeDot={{ r: 5 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="top_weight"
-                name="Top set"
-                stroke="var(--color-strain)"
-                strokeWidth={1.5}
-                strokeDasharray="3 3"
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <p className="text-sm text-[var(--color-text-faint)]">No data.</p>
-        )}
-      </Card>
-
-      {/* ============= WEEKLY VOLUME ============= */}
-      <Card title="Weekly Volume" hint="weight × reps · stacked by muscle group">
-        <VolumeChart data={weeklyVolume} />
-      </Card>
-    </div>
-  );
-}
-
-// ---------- Priority Lift Card ----------
-
-function PriorityLiftCard({
-  name,
-  history,
-  today,
-  color,
-  onSelect,
-}: {
-  name: string;
-  history: { date: string; top_weight: number; top_e1rm: number; sets: number }[];
-  today: Date;
-  color: string;
-  onSelect: () => void;
-}) {
-  if (history.length === 0) return null;
-  const latest = history[history.length - 1];
-  const earliest = history[0];
-
-  // Trend: latest weight vs 90 days ago (or earliest if shorter)
-  const cutoffDate = format(
-    new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000),
-    "yyyy-MM-dd"
-  );
-  const baseline = (() => {
-    const before = history.filter((h) => h.date <= cutoffDate);
-    if (before.length === 0) return earliest;
-    return before[before.length - 1];
-  })();
-  const delta = latest.top_e1rm - baseline.top_e1rm;
-  const deltaPct = baseline.top_e1rm > 0 ? (delta / baseline.top_e1rm) * 100 : 0;
-
-  const daysSince = differenceInDays(today, parseISO(latest.date));
-  const last90 = history.filter(
-    (h) => differenceInDays(today, parseISO(h.date)) <= 90
-  );
-
-  return (
-    <button
-      onClick={onSelect}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 text-left transition-colors hover:bg-[var(--color-surface-2)]"
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-sm font-medium text-[var(--color-text)]">
-          {name}
-        </span>
-        <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)]">
-          {last90.length} sessions · 90d
-        </span>
-      </div>
-      <div className="mt-3 flex items-baseline gap-2">
-        <span className="metric-num text-3xl font-semibold" style={{ color }}>
-          {Math.round(latest.top_e1rm)}
-        </span>
-        <span className="text-xs text-[var(--color-text-faint)]">
-          lbs · est. 1RM
-        </span>
-      </div>
-      <div className="mt-1 flex items-center gap-2 text-xs">
-        <span className="text-[var(--color-text-dim)]">
-          top set <span className="metric-num text-[var(--color-text)]">{Math.round(latest.top_weight)}</span>
-        </span>
-        {history.length >= 2 && (
-          <span
-            className={
-              delta > 0
-                ? "text-[var(--color-recovery)]"
-                : delta < 0
-                ? "text-[var(--color-alert)]"
-                : "text-[var(--color-text-faint)]"
-            }
-          >
-            {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} {Math.abs(deltaPct).toFixed(1)}% (90d)
-          </span>
-        )}
-      </div>
-      <div className="mt-1 text-[11px] text-[var(--color-text-faint)] tabular-nums">
-        Last lift: {formatLiftDate(latest.date)}{" "}
-        <span className="text-[var(--color-text-dim)]">
-          ({daysSince === 0 ? "today" : daysSince === 1 ? "yesterday" : `${daysSince} days ago`})
-        </span>
-      </div>
-
-      {history.length >= 2 && (
-        <div className="mt-3 -mx-1 h-14">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart
-              data={history}
-              margin={{ top: 4, right: 4, left: 4, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient
-                  id={`pri-${name.replace(/\W/g, "")}`}
-                  x1="0"
-                  y1="0"
-                  x2="0"
-                  y2="1"
-                >
-                  <stop offset="0%" stopColor={color} stopOpacity={0.4} />
-                  <stop offset="100%" stopColor={color} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="date" hide />
-              <YAxis hide domain={["dataMin - 5", "dataMax + 5"]} />
-              <Area
-                type="monotone"
-                dataKey="top_e1rm"
-                stroke={color}
-                strokeWidth={1.5}
-                fill={`url(#pri-${name.replace(/\W/g, "")})`}
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </button>
-  );
-}
-
-// ---------- Charts ----------
-
-function E1RMChart({
-  data,
-  lifts,
-}: {
-  data: Record<string, number | string>[];
-  lifts: string[];
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <LineChart data={data} margin={{ top: 16, right: 16, left: -8, bottom: 4 }}>
-        <CartesianGrid stroke={GRID} vertical={false} />
-        <XAxis
-          dataKey="date"
-          stroke={AXIS}
-          fontSize={11}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={formatChartTick}
-          minTickGap={32}
-          tickMargin={6}
-        />
-        <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={40} />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          cursor={{ stroke: GRID }}
-          labelFormatter={(v) => (typeof v === "string" ? formatLiftDate(v) : "")}
-          formatter={(value) => [`${Math.round(Number(value))} lbs`, "Est. 1RM"] as [string, string]}
-        />
-        <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1a1" }} iconType="line" />
-        {lifts.map((lift, i) => (
-          <Line
-            key={lift}
-            type="monotone"
-            dataKey={lift}
-            stroke={PRIORITY_COLORS[i % PRIORITY_COLORS.length]}
-            strokeWidth={2}
-            dot={false}
-            connectNulls
+      {active && active.history.length > 1 && (
+        <Card title={active.name} hint={active.bodyweight ? "Top set, reps" : "Estimated 1-rep max, lb"}>
+          <TrendChart
+            points={active.history.map((h) => ({ date: h.date, value: active.metric(h) || null }))}
+            unit={active.bodyweight ? "reps" : "lb"}
           />
-        ))}
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-function VolumeChart({ data }: { data: Record<string, number | string>[] }) {
-  const groups = ["Legs", "Back", "Chest", "Shoulders", "Arms", "Core"];
-  const colors: Record<string, string> = {
-    Legs: "var(--color-recovery)",
-    Back: "var(--color-strain)",
-    Chest: "var(--color-sleep)",
-    Shoulders: "var(--color-warn)",
-    Arms: "var(--color-alert)",
-    Core: "#a1a1a1",
-  };
-  return (
-    <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-        <CartesianGrid stroke={GRID} vertical={false} />
-        <XAxis
-          dataKey="date"
-          stroke={AXIS}
-          fontSize={10}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={formatChartTick}
-        />
-        <YAxis stroke={AXIS} fontSize={10} tickLine={false} axisLine={false} width={48} />
-        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#1c1c1c" }} />
-        <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1a1" }} iconType="square" />
-        {groups.map((g) => (
-          <Bar key={g} dataKey={g} stackId="vol" fill={colors[g]} />
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
   );
 }

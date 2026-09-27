@@ -1,193 +1,190 @@
-import { Card } from "@/components/card";
-import { GOALS } from "@/lib/mock";
-import { fetchDailyMetrics, fetchInBody } from "@/lib/data";
-import { format, parseISO, startOfWeek } from "date-fns";
+import { fetchBloodwork, fetchDailyMetrics, fetchStrongSets } from "@/lib/data";
+import { getDef } from "@/lib/biomarker-info";
+import { STATUS_VAR, avg, shortDate, todayISO, weekStart, withCanonical, type Status } from "@/lib/health";
 
 export const dynamic = "force-dynamic";
 
-export default async function GoalsPage() {
-  const [metrics, inbody] = await Promise.all([fetchDailyMetrics(90), fetchInBody()]);
+// Anthony's plan: lift 2x a week, ApoB down, sleep, steps.
+const LIFTS = 2;
+const SLEEP = 7.5;
+const STEPS = 8000;
+const WEEKS = 12;
 
-  // Compute weekly aggregates
-  const weekly = aggregateWeekly(metrics);
-  // Latest week
-  const latestWeek = weekly[weekly.length - 1];
+const roundTo = (v: number | null, d: number) => (v == null ? null : Number(v.toFixed(d)));
+
+type Week = { start: string; lifts: number; sleep: number | null; steps: number | null };
+
+export default async function GoalsPage() {
+  const [metrics, sets, markers] = await Promise.all([
+    fetchDailyMetrics(WEEKS * 7 + 7),
+    fetchStrongSets(WEEKS + 1),
+    fetchBloodwork(),
+  ]);
+
+  // Last 12 weeks, oldest first; the final one is this (unfinished) week
+  const thisWeek = weekStart(todayISO());
+  const starts: string[] = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const d = new Date(thisWeek + "T12:00:00");
+    d.setDate(d.getDate() - i * 7);
+    starts.push(d.toISOString().slice(0, 10));
+  }
+  const sessionDates = [...new Set(sets.map((s) => s.date))];
+  const weeks: Week[] = starts.map((start) => {
+    const days = metrics.filter((m) => weekStart(m.date) === start);
+    return {
+      start,
+      lifts: sessionDates.filter((d) => weekStart(d) === start).length,
+      sleep: roundTo(avg(days.map((d) => d.sleep_hours)), 1),
+      steps: avg(days.map((d) => d.steps)),
+    };
+  });
+  const current = weeks[weeks.length - 1];
+  const done = weeks.slice(0, -1);
+  const last4 = done.slice(-4);
+
+  const apob = markers
+    .map(withCanonical)
+    .filter((m) => getDef(m.marker)?.display === "Apolipoprotein B")
+    .sort((a, b) => a.panel_date.localeCompare(b.panel_date));
+  const apobTarget = getDef("ApoB")?.ref_high ?? 90;
+  const apobLatest = apob[apob.length - 1];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Goals</h1>
-        <p className="mt-1 text-xs text-[var(--color-text-faint)]">
-          Weekly average for steps & sleep · Monthly target for body fat.
+    <div className="mx-auto max-w-3xl space-y-6">
+      <header>
+        <h1 className="text-[28px] font-semibold tracking-[-0.02em] sm:text-[34px]">Goals</h1>
+        <p className="mt-1 text-[15px] text-[var(--color-text-dim)]">
+          The four targets in your health plan. Dots show the last {WEEKS} weeks, newest on the right.
         </p>
-      </div>
+      </header>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        {GOALS.map((g) => {
-          if (g.metric === "steps") {
-            const current = latestWeek.steps_avg;
-            const pct = Math.min(100, (current / g.target) * 100);
-            const hit = current >= g.target;
-            return <GoalCard key={g.metric} title={g.label} period={g.period} current={Math.round(current).toLocaleString()} target={g.target.toLocaleString()} unit={g.unit} pct={pct} hit={hit} />;
-          }
-          if (g.metric === "sleep") {
-            const current = latestWeek.sleep_avg;
-            const pct = Math.min(100, (current / g.target) * 100);
-            const hit = current >= g.target;
-            return <GoalCard key={g.metric} title={g.label} period={g.period} current={current.toFixed(1)} target={g.target.toFixed(1)} unit={g.unit} pct={pct} hit={hit} />;
-          }
-          // body fat — lower is better
-          const latest = inbody[inbody.length - 1].bf_pct;
-          const pct = Math.min(100, (g.target / latest) * 100);
-          const hit = latest <= g.target;
-          return <GoalCard key={g.metric} title={g.label} period={g.period} current={latest.toFixed(1)} target={g.target.toFixed(1)} unit={g.unit} pct={pct} hit={hit} />;
-        })}
-      </section>
+      <Goal
+        title="Lift twice a week"
+        source="Hevy"
+        value={`${current.lifts}`}
+        unit={`lift${current.lifts === 1 ? "" : "s"} this week`}
+        pct={(current.lifts / LIFTS) * 100}
+        status={current.lifts >= LIFTS ? "good" : "watch"}
+        summary={`Hit ${last4.filter((w) => w.lifts >= LIFTS).length} of the last 4 weeks.`}
+        dots={weeks.map((w, i) => dot(w.lifts >= LIFTS, i === weeks.length - 1, w.start, `${w.lifts} lifts`))}
+      />
 
-      <Card title="Weekly History" hint="last 12 weeks">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wider text-[var(--color-text-faint)]">
-              <th className="py-2">Week of</th>
-              <th className="py-2 text-right">Steps avg</th>
-              <th className="py-2 text-right">Sleep avg</th>
-              <th className="py-2 text-right">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {weekly.slice(-12).reverse().map((w) => {
-              const stepsHit = w.steps_avg >= 8000;
-              const sleepHit = w.sleep_avg >= 7.5;
-              return (
-                <tr key={w.week} className="border-b border-[var(--color-border)]/50">
-                  <td className="py-2 text-[var(--color-text-dim)]">{w.week}</td>
-                  <td className="py-2 text-right tabular-nums">{Math.round(w.steps_avg).toLocaleString()}</td>
-                  <td className="py-2 text-right tabular-nums">{w.sleep_avg.toFixed(1)}</td>
-                  <td className="py-2 text-right text-xs">
-                    <span className={stepsHit ? "text-[var(--color-recovery)]" : "text-[var(--color-text-faint)]"}>
-                      {stepsHit ? "✓" : "—"} steps
-                    </span>
-                    <span className="mx-1 text-[var(--color-text-faint)]">·</span>
-                    <span className={sleepHit ? "text-[var(--color-recovery)]" : "text-[var(--color-text-faint)]"}>
-                      {sleepHit ? "✓" : "—"} sleep
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Card>
+      <Goal
+        title={`Get ApoB under ${apobTarget}`}
+        source={apobLatest ? `Labs, ${shortDate(apobLatest.panel_date)}` : "Labs"}
+        value={apobLatest ? `${apobLatest.value}` : "–"}
+        unit="mg/dL"
+        pct={apobLatest ? Math.min(100, (apobTarget / apobLatest.value) * 100) : 0}
+        status={!apobLatest ? "none" : apobLatest.value <= apobTarget ? "good" : "bad"}
+        summary={
+          !apobLatest
+            ? "No ApoB result yet."
+            : apobLatest.value <= apobTarget
+              ? "At goal. ApoB counts the particles that build plaque in arteries."
+              : `${Math.round(apobLatest.value - apobTarget)} above goal. ApoB counts the particles that build plaque in arteries.`
+        }
+        dots={apob.map((m, i) =>
+          dot(m.value <= apobTarget, false, m.panel_date, `${m.value} mg/dL`, i === apob.length - 1)
+        )}
+        dotsLabel="Each result"
+      />
 
-      <Card title="Body Fat — Monthly" hint="target 15%">
-        <BFHistory inbody={inbody} target={15} />
-      </Card>
+      <Goal
+        title={`Sleep ${SLEEP} hours a night`}
+        source="Oura"
+        value={current.sleep != null ? current.sleep.toFixed(1) : "–"}
+        unit="h average this week"
+        pct={current.sleep != null ? Math.min(100, (current.sleep / SLEEP) * 100) : 0}
+        status={current.sleep == null ? "none" : current.sleep >= SLEEP ? "good" : "watch"}
+        summary={`Hit ${last4.filter((w) => (w.sleep ?? 0) >= SLEEP).length} of the last 4 weeks.`}
+        dots={weeks.map((w, i) =>
+          dot((w.sleep ?? 0) >= SLEEP, i === weeks.length - 1, w.start, w.sleep != null ? `${w.sleep.toFixed(1)} h` : "No data")
+        )}
+      />
+
+      <Goal
+        title={`Walk ${STEPS.toLocaleString()} steps a day`}
+        source="Oura"
+        value={current.steps != null ? Math.round(current.steps).toLocaleString() : "–"}
+        unit="average this week"
+        pct={current.steps != null ? Math.min(100, (current.steps / STEPS) * 100) : 0}
+        status={current.steps == null ? "none" : current.steps >= STEPS ? "good" : "watch"}
+        summary={`Hit ${last4.filter((w) => (w.steps ?? 0) >= STEPS).length} of the last 4 weeks.`}
+        dots={weeks.map((w, i) =>
+          dot((w.steps ?? 0) >= STEPS, i === weeks.length - 1, w.start, w.steps != null ? `${Math.round(w.steps).toLocaleString()} steps` : "No data")
+        )}
+      />
     </div>
   );
 }
 
-function GoalCard({
+type Dot = { hit: boolean; inProgress: boolean; label: string };
+
+function dot(hit: boolean, inProgress: boolean, date: string, detail: string, latest = false): Dot {
+  const when = inProgress ? "This week so far" : latest ? `Latest, ${shortDate(date)}` : `Week of ${shortDate(date)}`;
+  return { hit, inProgress, label: `${when}: ${detail}${hit ? ", goal met" : ""}` };
+}
+
+function Goal({
   title,
-  period,
-  current,
-  target,
+  source,
+  value,
   unit,
   pct,
-  hit,
+  status,
+  summary,
+  dots,
+  dotsLabel = `Last ${WEEKS} weeks`,
 }: {
   title: string;
-  period: "weekly" | "monthly";
-  current: string;
-  target: string;
+  source: string;
+  value: string;
   unit: string;
   pct: number;
-  hit: boolean;
+  status: Status;
+  summary: string;
+  dots: Dot[];
+  dotsLabel?: string;
 }) {
-  const color = hit ? "var(--color-recovery)" : "var(--color-warn)";
+  const color = STATUS_VAR[status];
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-          {title}
-        </h3>
-        <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)]">
-          {period}
-        </span>
+    <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-[17px] font-semibold">{title}</h2>
+        <span className="shrink-0 text-[13px] text-[var(--color-text-dim)]">{source}</span>
       </div>
-      <div className="mt-4 flex items-baseline gap-2">
-        <span className="metric-num text-4xl font-semibold" style={{ color }}>
-          {current}
-        </span>
-        <span className="text-sm text-[var(--color-text-faint)]">/ {target} {unit}</span>
+      <div className="mt-3 flex items-baseline gap-1.5">
+        <span className="metric-num text-[32px] font-semibold leading-none">{value}</span>
+        <span className="text-[15px] text-[var(--color-text-dim)]">{unit}</span>
       </div>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
+        <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
       </div>
-      <div className="mt-2 text-xs" style={{ color: hit ? "var(--color-recovery)" : "var(--color-text-faint)" }}>
-        {hit ? "✓ On track" : "Below target"}
-      </div>
-    </div>
-  );
-}
-
-function aggregateWeekly(metrics: Awaited<ReturnType<typeof fetchDailyMetrics>>) {
-  const byWeek = new Map<string, { steps: number[]; sleep: number[] }>();
-  for (const m of metrics) {
-    const wk = format(startOfWeek(parseISO(m.date), { weekStartsOn: 1 }), "yyyy-MM-dd");
-    const acc = byWeek.get(wk) ?? { steps: [], sleep: [] };
-    acc.steps.push(m.steps);
-    acc.sleep.push(m.sleep_hours);
-    byWeek.set(wk, acc);
-  }
-  return [...byWeek.entries()]
-    .map(([week, v]) => ({
-      week,
-      steps_avg: v.steps.reduce((a, b) => a + b, 0) / v.steps.length,
-      sleep_avg: v.sleep.reduce((a, b) => a + b, 0) / v.sleep.length,
-    }))
-    .sort((a, b) => a.week.localeCompare(b.week));
-}
-
-function BFHistory({ inbody, target }: { inbody: Awaited<ReturnType<typeof fetchInBody>>; target: number }) {
-  return (
-    <div className="space-y-2">
-      {inbody.map((s, idx) => {
-        const prev = inbody[idx - 1];
-        const delta = prev ? s.bf_pct - prev.bf_pct : null;
-        const hit = s.bf_pct <= target;
-        return (
-          <div key={s.date} className="flex items-center gap-4 border-b border-[var(--color-border)]/50 py-2 text-sm last:border-b-0">
-            <span className="w-24 text-[var(--color-text-dim)]">{s.date}</span>
-            <span className="metric-num w-16 tabular-nums" style={{ color: hit ? "var(--color-recovery)" : "var(--color-warn)" }}>
-              {s.bf_pct.toFixed(1)}%
-            </span>
-            <div className="flex-1">
-              <div className="relative h-1.5 rounded-full bg-[var(--color-border)]">
-                <div
-                  className="absolute top-0 h-full rounded-full"
-                  style={{
-                    width: `${Math.min(100, (s.bf_pct / 25) * 100)}%`,
-                    background: hit ? "var(--color-recovery)" : "var(--color-warn)",
-                  }}
-                />
-                <div
-                  className="absolute -top-0.5 h-2.5 w-0.5"
-                  style={{
-                    left: `${(target / 25) * 100}%`,
-                    background: "var(--color-text)",
-                  }}
-                  title={`Target ${target}%`}
-                />
-              </div>
-            </div>
-            {delta != null && (
-              <span className="metric-num w-16 text-right text-xs tabular-nums" style={{ color: delta < 0 ? "var(--color-recovery)" : "var(--color-alert)" }}>
-                {delta > 0 ? "+" : ""}{delta.toFixed(1)}
-              </span>
-            )}
+      <p className="mt-2 text-[15px]" style={{ color: status === "good" ? color : "var(--color-text-dim)" }}>
+        {summary}
+      </p>
+      {dots.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[13px] text-[var(--color-text-dim)]">{dotsLabel}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5" role="list">
+            {dots.map((d, i) => (
+              <span
+                key={i}
+                role="listitem"
+                title={d.label}
+                aria-label={d.label}
+                className="h-3.5 w-3.5 rounded-full"
+                style={{
+                  background: d.hit ? "var(--color-good)" : "var(--color-surface-2)",
+                  outline: d.inProgress ? "1.5px dashed var(--color-text-dim)" : undefined,
+                  outlineOffset: 2,
+                }}
+              />
+            ))}
           </div>
-        );
-      })}
-    </div>
+        </div>
+      )}
+    </section>
   );
 }

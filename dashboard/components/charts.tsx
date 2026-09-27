@@ -1,211 +1,98 @@
 "use client";
 
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { ComposedChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-const AXIS_COLOR = "#6b6b6b";
-const GRID_COLOR = "#262626";
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthDay = (iso: string) => `${MONTHS[parseInt(iso.slice(5, 7), 10) - 1]} ${parseInt(iso.slice(8, 10), 10)}`;
+const monthOnly = (iso: string) => MONTHS[parseInt(iso.slice(5, 7), 10) - 1];
 
-/** Compact axis label formatter — "1234" -> "1.2k", "12000" -> "12k". */
+export type Point = { date: string; value: number | null };
+
+/** Trailing 7-day mean, skipping missing days. */
+function rolling(points: Point[]): (number | null)[] {
+  return points.map((_, i) => {
+    const w = points.slice(Math.max(0, i - 6), i + 1).map((p) => p.value).filter((v): v is number => v != null);
+    return w.length >= 3 ? w.reduce((a, b) => a + b, 0) / w.length : null;
+  });
+}
+
 function fmtAxis(v: number): string {
-  if (v == null || isNaN(v)) return "";
-  const n = Number(v);
-  if (Math.abs(n) >= 1000) {
-    return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
-  }
-  // Drop unnecessary decimals
-  return Number.isInteger(n) ? n.toString() : n.toFixed(1);
+  if (Math.abs(v) >= 1000) return `${Math.round(v / 100) / 10}k`;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
-const tooltipStyle = {
-  background: "#141414",
-  border: "1px solid #262626",
-  borderRadius: 8,
-  fontSize: 12,
-  color: "#f5f5f5",
-};
-
-type Datum = Record<string, number | string>;
-
-export function TrendArea({
-  data,
-  dataKey,
-  color = "var(--color-recovery)",
-  unit = "",
+/**
+ * One metric: each day as a faint dot, the 7-day average as a solid line.
+ * The y-axis fits the data (never forced to zero) so real change is visible.
+ */
+export function TrendChart({
+  points,
+  unit,
+  digits = 0,
+  goal,
   height = 180,
-  xKey = "date",
 }: {
-  data: Datum[];
-  dataKey: string;
-  color?: string;
-  unit?: string;
+  points: Point[];
+  unit: string;
+  digits?: number;
+  goal?: number;
   height?: number;
-  xKey?: string;
 }) {
+  const avg = rolling(points);
+  const data = points.map((p, i) => ({ date: p.date, day: p.value, avg: avg[i] }));
+  const long = points.length > 120;
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-        <defs>
-          <linearGradient id={`grad-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.4} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+      <ComposedChart data={data} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
+        <CartesianGrid stroke="var(--color-border)" vertical={false} />
         <XAxis
-          dataKey={xKey}
-          stroke={AXIS_COLOR}
-          fontSize={10}
+          dataKey="date"
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
-          minTickGap={24}
+          fontSize={11}
+          stroke="var(--color-text-dim)"
+          tickFormatter={long ? monthOnly : monthDay}
+          minTickGap={36}
         />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          cursor={{ stroke: GRID_COLOR }}
-          formatter={(v) => [`${v}${unit}`, dataKey] as [string, string]}
-        />
-        <Area
-          type="monotone"
-          dataKey={dataKey}
-          stroke={color}
-          strokeWidth={2}
-          fill={`url(#grad-${dataKey})`}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
-
-export function TrendLine({
-  data,
-  dataKey,
-  color = "var(--color-recovery)",
-  unit = "",
-  height = 180,
-  xKey = "date",
-}: {
-  data: Datum[];
-  dataKey: string;
-  color?: string;
-  unit?: string;
-  height?: number;
-  xKey?: string;
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-        <CartesianGrid stroke={GRID_COLOR} vertical={false} />
-        <XAxis
-          dataKey={xKey}
-          stroke={AXIS_COLOR}
-          fontSize={10}
+        <YAxis
+          domain={[(min: number) => Math.floor(Math.min(min, goal ?? min) * 0.95), (max: number) => Math.ceil(Math.max(max, goal ?? max) * 1.03)]}
+          tickCount={3}
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
-          minTickGap={24}
+          fontSize={11}
+          stroke="var(--color-text-dim)"
+          width={44}
+          tickFormatter={fmtAxis}
+          allowDecimals={digits > 0}
         />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
         <Tooltip
-          contentStyle={tooltipStyle}
-          cursor={{ stroke: GRID_COLOR }}
-          formatter={(v) => [`${v}${unit}`, dataKey] as [string, string]}
+          cursor={{ stroke: "var(--color-border)" }}
+          contentStyle={{
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "var(--color-text)",
+          }}
+          labelFormatter={(l) => monthDay(String(l))}
+          formatter={(v, name) => [
+            v == null ? "–" : `${Number(v).toFixed(digits)} ${unit}`,
+            name === "avg" ? "7-day average" : "That day",
+          ]}
         />
+        {goal != null && (
+          <Line dataKey={() => goal} stroke="var(--color-good)" strokeDasharray="4 4" strokeWidth={1} dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
+        )}
         <Line
-          type="monotone"
-          dataKey={dataKey}
-          stroke={color}
-          strokeWidth={2}
-          dot={false}
+          dataKey="day"
+          stroke="transparent"
+          dot={{ r: 1.6, fill: "var(--color-chart-soft)", stroke: "none" }}
+          activeDot={{ r: 3.5, fill: "var(--color-text-dim)" }}
+          isAnimationActive={false}
         />
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-export function BarSeries({
-  data,
-  dataKey,
-  color = "var(--color-strain)",
-  height = 180,
-  xKey = "date",
-  unit = "",
-}: {
-  data: Datum[];
-  dataKey: string;
-  color?: string;
-  height?: number;
-  xKey?: string;
-  unit?: string;
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-        <CartesianGrid stroke={GRID_COLOR} vertical={false} />
-        <XAxis
-          dataKey={xKey}
-          stroke={AXIS_COLOR}
-          fontSize={10}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
-          minTickGap={16}
-        />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          cursor={{ fill: "#1c1c1c" }}
-          formatter={(v) => [`${v}${unit}`, dataKey] as [string, string]}
-        />
-        <Bar dataKey={dataKey} fill={color} radius={[2, 2, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-export function StackedBars({
-  data,
-  keys,
-  height = 220,
-  xKey = "date",
-}: {
-  data: Datum[];
-  keys: { key: string; color: string; label: string }[];
-  height?: number;
-  xKey?: string;
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-        <CartesianGrid stroke={GRID_COLOR} vertical={false} />
-        <XAxis
-          dataKey={xKey}
-          stroke={AXIS_COLOR}
-          fontSize={10}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
-          minTickGap={16}
-        />
-        <YAxis stroke={AXIS_COLOR} fontSize={10} tickLine={false} axisLine={false} width={44} tickFormatter={fmtAxis} />
-        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#1c1c1c" }} />
-        {keys.map((k) => (
-          <Bar key={k.key} dataKey={k.key} stackId="a" fill={k.color} name={k.label} />
-        ))}
-      </BarChart>
+        <Line dataKey="avg" stroke="var(--color-chart)" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }

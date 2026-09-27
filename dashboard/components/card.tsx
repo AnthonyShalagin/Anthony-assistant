@@ -15,80 +15,23 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5",
+        "rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5",
         className
       )}
     >
       {(title || hint) && (
-        <div className="mb-4 flex items-baseline justify-between">
+        <div className="mb-4 flex items-baseline justify-between gap-3">
           {title && (
-            <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+            <h3 className="text-[15px] font-semibold text-[var(--color-text)]">
               {title}
             </h3>
           )}
           {hint && (
-            <span className="text-xs text-[var(--color-text-faint)]">{hint}</span>
+            <span className="text-[13px] text-[var(--color-text-dim)]">{hint}</span>
           )}
         </div>
       )}
       {children}
-    </div>
-  );
-}
-
-export function MetricCard({
-  label,
-  value,
-  unit,
-  delta,
-  accent,
-  hint,
-}: {
-  label: string;
-  value: string | number;
-  unit?: string;
-  delta?: { value: string; positive: boolean };
-  accent?: "recovery" | "strain" | "sleep" | "alert" | "warn";
-  hint?: string;
-}) {
-  const accentColor = accent
-    ? `var(--color-${accent})`
-    : "var(--color-text)";
-  return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-      <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
-        {label}
-      </div>
-      <div className="mt-3 flex items-baseline gap-2">
-        <span
-          className="metric-num text-4xl font-semibold leading-none"
-          style={{ color: accentColor }}
-        >
-          {value}
-        </span>
-        {unit && (
-          <span className="text-sm text-[var(--color-text-faint)]">{unit}</span>
-        )}
-      </div>
-      {(delta || hint) && (
-        <div className="mt-3 flex items-center justify-between text-xs">
-          {delta ? (
-            <span
-              className={cn(
-                "tabular-nums",
-                delta.positive ? "text-[var(--color-recovery)]" : "text-[var(--color-alert)]"
-              )}
-            >
-              {delta.positive ? "▲" : "▼"} {delta.value}
-            </span>
-          ) : (
-            <span />
-          )}
-          {hint && (
-            <span className="text-[var(--color-text-faint)]">{hint}</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

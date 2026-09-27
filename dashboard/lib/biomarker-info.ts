@@ -372,8 +372,39 @@ export const BIOMARKERS: Record<string, BiomarkerDef> = {
   },
 };
 
+// Lookup tolerant of spacing/punctuation ("TotalCholesterol", "total cholesterol")
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const ALIASES: Record<string, string> = {
+  apolipoproteinb: "ApoB",
+  a1c: "HbA1c",
+  hemoglobina1c: "HbA1c",
+  fastingglucose: "Glucose",
+  fastinginsulin: "Insulin (fasting)",
+  hscrp: "hs-CRP",
+  vitamind: "Vitamin D, 25-OH",
+  hdl: "HDL-C",
+  ldl: "LDL-C",
+  testosterone: "Testosterone, Total",
+  freet: "Testosterone, Free",
+};
+const BY_NORM = new Map(Object.keys(BIOMARKERS).map((k) => [norm(k), k]));
+
+function resolve(marker: string): string | undefined {
+  if (BIOMARKERS[marker]) return marker;
+  const n = norm(marker);
+  return BY_NORM.get(n) ?? ALIASES[n];
+}
+
 export function getDef(marker: string): BiomarkerDef | undefined {
-  return BIOMARKERS[marker];
+  const key = resolve(marker);
+  return key ? BIOMARKERS[key] : undefined;
+}
+
+/** Readable name: the definition's display name, its key, or "TotalCholesterol" -> "Total Cholesterol". */
+export function displayName(marker: string): string {
+  const key = resolve(marker);
+  if (key) return BIOMARKERS[key].display ?? key;
+  return marker.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
 /** Compute status from a value using canonical ranges. */
@@ -381,7 +412,7 @@ export function canonicalStatus(
   marker: string,
   value: number
 ): "optimal" | "high" | "low" | "normal" {
-  const def = BIOMARKERS[marker];
+  const def = getDef(marker);
   if (!def) return "normal";
   if (def.ref_low != null && value < def.ref_low) return "low";
   if (def.ref_high != null && value > def.ref_high) return "high";

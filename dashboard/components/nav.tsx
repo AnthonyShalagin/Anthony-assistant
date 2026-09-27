@@ -4,63 +4,57 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 
+// Four places, named for what you want to know. Trends opens from Today.
 const TABS = [
   { href: "/", label: "Today" },
-  { href: "/trends", label: "Trends" },
-  { href: "/strength", label: "Strength" },
-  { href: "/bloodwork", label: "Bloodwork" },
+  { href: "/strength", label: "Training" },
+  { href: "/bloodwork", label: "Labs" },
   { href: "/goals", label: "Goals" },
 ];
 
+const isAuthPage = (p: string | null) => p === "/login" || p === "/403" || !!p?.startsWith("/auth/");
+
 export function Nav() {
   const pathname = usePathname();
-  // Hide nav on auth pages
-  if (pathname === "/login" || pathname === "/403" || pathname?.startsWith("/auth/")) {
-    return null;
-  }
+  if (isAuthPage(pathname)) return null;
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" || pathname.startsWith("/trends") : pathname.startsWith(href);
+
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/85 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-4">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[var(--color-recovery)] shadow-[0_0_10px_var(--color-recovery)]" />
-          <span className="text-sm font-semibold tracking-[0.3em] text-[var(--color-text)] uppercase">
-            Anthony
-          </span>
-        </Link>
-        <nav className="order-last -mx-1 flex w-full items-center gap-1 overflow-x-auto sm:order-none sm:mx-0 sm:w-auto">
-          {TABS.map((t) => {
-            const active = t.href === "/" ? pathname === "/" : pathname.startsWith(t.href);
-            return (
-              <Link
-                key={t.href}
-                href={t.href}
-                className={cn(
-                  "shrink-0 rounded px-3 py-1.5 text-sm transition-colors",
-                  active
-                    ? "bg-[var(--color-surface)] text-[var(--color-text)]"
-                    : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-                )}
-              >
-                {t.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="flex items-center gap-3 text-xs">
-          <span className="hidden text-[var(--color-text-faint)] tabular-nums sm:inline">
-            {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-          </span>
-          <form action="/auth/signout" method="post">
-            <button
-              type="submit"
-              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[var(--color-text-dim)] transition-colors hover:text-[var(--color-text)]"
-              title="Sign out"
+    <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/90 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 py-2.5 sm:px-6">
+        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {TABS.map((t) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              aria-current={isActive(t.href) ? "page" : undefined}
+              className={cn(
+                "shrink-0 rounded-full px-3.5 py-1.5 text-[15px] transition-colors",
+                isActive(t.href)
+                  ? "bg-[var(--color-text)] font-medium text-[var(--color-bg)]"
+                  : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+              )}
             >
-              Sign out
-            </button>
-          </form>
-        </div>
+              {t.label}
+            </Link>
+          ))}
+        </nav>
       </div>
     </header>
+  );
+}
+
+export function Footer() {
+  const pathname = usePathname();
+  if (isAuthPage(pathname)) return null;
+  return (
+    <footer className="mx-auto max-w-3xl px-4 pb-10 sm:px-6">
+      <form action="/auth/signout" method="post">
+        <button type="submit" className="text-[13px] text-[var(--color-text-dim)] hover:text-[var(--color-text)]">
+          Sign out
+        </button>
+      </form>
+    </footer>
   );
 }

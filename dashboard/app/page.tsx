@@ -1,14 +1,18 @@
-import { fetchDailyMetrics, fetchInBody, fetchLastWorkout } from "@/lib/data";
+import { fetchBloodwork, fetchDailyMetrics, fetchInBody, fetchStrongSets } from "@/lib/data";
 import { TodayClient } from "./today-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
-  const [days, inbody, lastWorkout] = await Promise.all([
-    fetchDailyMetrics(400), // 400 days lets us compute 365d avg + prior 365d delta
+  const [days, inbody, sets, markers] = await Promise.all([
+    fetchDailyMetrics(60),
     fetchInBody(),
-    fetchLastWorkout(),
+    fetchStrongSets(8),
+    fetchBloodwork(),
   ]);
+
+  // One lifting session per day with logged sets
+  const sessionDates = [...new Set(sets.map((s) => s.date))].sort();
 
   return (
     <TodayClient
@@ -16,15 +20,14 @@ export default async function TodayPage() {
         date: d.date,
         hrv: d.hrv ?? null,
         rhr: d.rhr ?? null,
-        sleep_score: d.sleep_score ?? null,
         sleep_hours: d.sleep_hours ?? null,
         steps: d.steps ?? null,
         recovery_score: d.recovery_score ?? null,
         strain: d.strain ?? null,
-        source: null,
       }))}
       inbody={inbody}
-      lastWorkout={lastWorkout}
+      sessionDates={sessionDates}
+      markers={markers}
     />
   );
 }

@@ -11,7 +11,6 @@ export default async function TrendsPage() {
         date: d.date,
         hrv: d.hrv ?? null,
         rhr: d.rhr ?? null,
-        sleep_score: d.sleep_score ?? null,
         sleep_hours: d.sleep_hours ?? null,
         steps: d.steps ?? null,
         recovery_score: d.recovery_score ?? null,

@@ -53,7 +53,7 @@ export type BloodMarker = {
 
 // ---------- Generators (deterministic-ish) ----------
 
-const today = new Date("2026-05-03");
+const today = new Date(); // preview data ends today
 
 function rand(seed: number) {
   // Tiny seeded RNG for stable mock values
@@ -228,17 +228,3 @@ export function getBloodwork(): BloodMarker[] {
 }
 
 // Goals
-export type Goal = {
-  metric: "steps" | "sleep" | "bf";
-  label: string;
-  target: number;
-  unit: string;
-  period: "weekly" | "monthly";
-  comparison: "gte" | "lte";
-};
-
-export const GOALS: Goal[] = [
-  { metric: "steps", label: "Steps", target: 8000, unit: "/day avg", period: "weekly", comparison: "gte" },
-  { metric: "sleep", label: "Sleep", target: 7.5, unit: "hr/day avg", period: "weekly", comparison: "gte" },
-  { metric: "bf", label: "Body Fat", target: 15, unit: "%", period: "monthly", comparison: "lte" },
-];
