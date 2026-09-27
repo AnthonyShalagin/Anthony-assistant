@@ -3,6 +3,7 @@
 Schedule (Eastern Time):
   09:00 — Healthcheck (silent)
   09:30 — Oura daily pull (incl. workouts)
+  09:32 — Hevy pull (last 3 days of lifting)
   09:35 — Whoop daily pull
   09:40 — Supabase sync for the dashboard
 """
@@ -113,6 +114,7 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
     from healthcheck import run_healthcheck
     from clients.oura import pull_daily as oura_pull
     from clients.whoop import pull_daily as whoop_pull
+    from clients.hevy import pull_daily as hevy_pull
 
     s = Scheduler()
 
@@ -121,6 +123,9 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
 
     # 09:30 — Oura pull
     s.add_job("Oura Pull", 9, 30, lambda: oura_pull(db_path=db_path))
+
+    # 09:32 — Hevy pull
+    s.add_job("Hevy Pull", 9, 32, lambda: hevy_pull(db_path=db_path))
 
     # 09:35 — Whoop pull
     s.add_job("Whoop Pull", 9, 35, lambda: whoop_pull(db_path=db_path))
@@ -131,8 +136,8 @@ def create_default_scheduler(db_path: Optional[str] = None) -> Scheduler:
 
     # No scheduled Telegram messages. The daily briefing went unread, so health
     # is now one section of the Sunday Life OS review on Anthony's Mac, which
-    # reads this DB through export_week.py. Strong workouts arrive through
-    # Apple Health -> Oura, so the monthly "export your CSV" reminder is gone.
+    # reads this DB through export_week.py. Lifting arrives from the Hevy
+    # API, so the monthly "export your CSV" reminder is gone.
     # generate_briefing is still available on demand via Jarvis.
 
     return s

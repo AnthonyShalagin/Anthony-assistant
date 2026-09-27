@@ -18,10 +18,11 @@ def test_check_database_bad_path():
     assert ok is False
 
 
+@patch("healthcheck.check_hevy_token", return_value=(True, "OK"))
 @patch("healthcheck.check_whoop_token", return_value=(True, "OK"))
 @patch("healthcheck.check_oura_token", return_value=(True, "OK"))
 @patch("healthcheck.send_message")
-def test_run_healthcheck_all_ok(mock_send, mock_oura, mock_whoop, tmp_db):
+def test_run_healthcheck_all_ok(mock_send, mock_oura, mock_whoop, mock_hevy, tmp_db):
     """run_healthcheck reports all OK."""
     results = run_healthcheck(db_path=tmp_db, notify=True)
     assert all(r["ok"] for r in results.values())

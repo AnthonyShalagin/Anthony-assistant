@@ -4,7 +4,7 @@
 
 Personal health intelligence agent built on Hermes Agent (by Nous Research) that:
 
-- Pulls daily data from Oura Ring and Whoop APIs
+- Pulls daily data from Oura Ring, Whoop, and Hevy (lifting) APIs
 - Accepts Strong app CSV uploads via Telegram
 - Stores everything in SQLite
 - Generates health briefings on demand (via Jarvis); the weekly summary lives in the Life OS review
@@ -46,6 +46,7 @@ health-agent/
 ├── telegram_bot.py           # Long-polling bot for messages + CSV uploads
 ├── clients/
 │   ├── oura.py               # Oura Ring API (bearer token)
+│   ├── hevy.py               # Hevy API (api-key header, Hevy Pro)
 │   └── whoop.py              # Whoop API (OAuth2 + auto-refresh)
 ├── parsers/
 │   └── strong.py             # Strong app CSV parser (Epley 1RM)
@@ -115,6 +116,14 @@ health-agent/
 - **Metrics**: sleep_score, readiness_score, activity_score, hrv_average, steps, active_calories, heart_rate_average, breath_average, temperature_deviation, workout_count, workout_minutes, strength_sessions, strength_minutes
 - **Workouts**: Anthony logs lifting only in Strong. Strong writes to Apple Health and Oura imports it, so `workout` is how training shows up without CSV exports. Each pull writes yesterday and today, zeros included.
 - **Token caveat**: Oura stopped issuing personal access tokens in Dec 2025. Older tokens may keep working; if pulls start returning 401, move to Oura OAuth2.
+
+### Hevy (lifting, from Sept 2026)
+- **Auth**: `api-key` header (`HEVY_API_KEY`), generated at https://hevy.com/settings?developer. Needs Hevy Pro.
+- **Base URL**: `https://api.hevyapp.com/v1`. Spec: https://api.hevyapp.com/docs/
+- **Why**: Strong has no API, and Strong -> Apple Health -> Oura only syncs the current day, so sessions were silently dropped. Hevy is queryable retroactively.
+- **Metrics** (source `hevy`, every day written, zeros included): strength_sessions, strength_minutes, working_sets, hard_sets (RPE 8+ or failure), rpe_logged_sets. Days use Eastern time.
+- **Sets** go into `workouts` (warmups skipped, kg converted to lb, Epley 1RM).
+- Daily pull at 09:32 re-pulls the last 3 days. `backfill_hevy.py [days]` fills any gap.
 
 ### Whoop
 - **Auth**: OAuth2 with the `offline` scope, so a refresh token is issued

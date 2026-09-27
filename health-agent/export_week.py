@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_DB = os.environ.get("DB_PATH") or str(Path(__file__).resolve().parent / "data" / "health.db")
-SOURCES = ("oura", "whoop")
+SOURCES = ("oura", "whoop", "hevy")
 
 
 def export(db_path: str, days: int, today: Optional[date] = None) -> dict:

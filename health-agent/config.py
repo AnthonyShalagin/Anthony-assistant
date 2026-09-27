@@ -21,6 +21,9 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 # Oura Ring — bearer token auth
 OURA_TOKEN = os.environ.get("OURA_TOKEN", "")
 
+# Hevy — API key from https://hevy.com/settings?developer (Hevy Pro)
+HEVY_API_KEY = os.environ.get("HEVY_API_KEY", "")
+
 # Whoop — OAuth2
 WHOOP_CLIENT_ID = os.environ.get("WHOOP_CLIENT_ID", "")
 WHOOP_CLIENT_SECRET = os.environ.get("WHOOP_CLIENT_SECRET", "")
@@ -38,6 +41,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SCHEDULE = {
     "healthcheck": "09:00",
     "oura_pull": "09:30",
+    "hevy_pull": "09:32",
     "whoop_pull": "09:35",
     "daily_briefing": "10:00",
     "weekly_briefing": "10:30",  # Sundays only

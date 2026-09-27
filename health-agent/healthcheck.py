@@ -6,7 +6,7 @@ Runs at 6:00 AM before daily pulls. Reports status via Telegram.
 import logging
 from typing import Optional
 
-from config import OURA_TOKEN, DB_PATH
+from config import HEVY_API_KEY, OURA_TOKEN, DB_PATH
 from database import get_db, init_db
 from telegram_bot import send_message
 
@@ -50,6 +50,16 @@ def check_oura_token(token: Optional[str] = None) -> tuple[bool, str]:
     return ok, "OK" if ok else "Token invalid or expired"
 
 
+def check_hevy_token(api_key: Optional[str] = None) -> tuple[bool, str]:
+    """Verify the Hevy API key is valid."""
+    from clients.hevy import verify_token
+    k = api_key or HEVY_API_KEY
+    if not k:
+        return False, "HEVY_API_KEY not configured"
+    ok = verify_token(k)
+    return ok, "OK" if ok else "API key invalid (Hevy Pro lapsed?)"
+
+
 def check_whoop_token(db_path: Optional[str] = None) -> tuple[bool, str]:
     """Verify Whoop OAuth token is valid (or can be refreshed)."""
     from clients.whoop import verify_token
@@ -71,6 +81,10 @@ def run_healthcheck(db_path: Optional[str] = None, notify: bool = True) -> dict:
     # Oura
     ok, msg = check_oura_token()
     results["oura"] = {"ok": ok, "message": msg}
+
+    # Hevy
+    ok, msg = check_hevy_token()
+    results["hevy"] = {"ok": ok, "message": msg}
 
     # Whoop
     ok, msg = check_whoop_token(db_path)
