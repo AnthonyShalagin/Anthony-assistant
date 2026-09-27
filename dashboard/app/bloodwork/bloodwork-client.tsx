@@ -484,7 +484,7 @@ function HoverPopover({
 
   return (
     <div
-      className="fixed z-50 w-[540px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 shadow-2xl"
+      className="fixed z-50 w-[min(540px,calc(100vw-32px))] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 shadow-2xl"
       style={{ top, left }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}

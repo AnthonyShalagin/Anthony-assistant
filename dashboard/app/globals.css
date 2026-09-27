@@ -38,3 +38,9 @@ html, body {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
+
+/* Grid items default to min-width:auto, so a chart or long label can push a
+   column wider than the phone screen. Let them shrink instead. */
+.grid > * {
+  min-width: 0;
+}

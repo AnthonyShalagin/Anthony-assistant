@@ -58,7 +58,7 @@ export function TrendsClient({ metrics }: { metrics: DailyMetric[] }) {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Trends</h1>
           <p className="mt-1 text-xs text-[var(--color-text-faint)]">

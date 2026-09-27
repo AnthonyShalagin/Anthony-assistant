@@ -20,14 +20,14 @@ export function Nav() {
   }
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/85 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-4">
         <Link href="/" className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[var(--color-recovery)] shadow-[0_0_10px_var(--color-recovery)]" />
           <span className="text-sm font-semibold tracking-[0.3em] text-[var(--color-text)] uppercase">
             Anthony
           </span>
         </Link>
-        <nav className="flex items-center gap-1">
+        <nav className="order-last -mx-1 flex w-full items-center gap-1 overflow-x-auto sm:order-none sm:mx-0 sm:w-auto">
           {TABS.map((t) => {
             const active = t.href === "/" ? pathname === "/" : pathname.startsWith(t.href);
             return (
@@ -35,7 +35,7 @@ export function Nav() {
                 key={t.href}
                 href={t.href}
                 className={cn(
-                  "rounded px-3 py-1.5 text-sm transition-colors",
+                  "shrink-0 rounded px-3 py-1.5 text-sm transition-colors",
                   active
                     ? "bg-[var(--color-surface)] text-[var(--color-text)]"
                     : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
@@ -47,7 +47,7 @@ export function Nav() {
           })}
         </nav>
         <div className="flex items-center gap-3 text-xs">
-          <span className="text-[var(--color-text-faint)] tabular-nums">
+          <span className="hidden text-[var(--color-text-faint)] tabular-nums sm:inline">
             {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
           </span>
           <form action="/auth/signout" method="post">

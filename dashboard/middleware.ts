@@ -9,6 +9,11 @@ const PUBLIC_PATHS = ["/login", "/auth/callback", "/_next", "/favicon.ico", "/40
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  // Local preview without Supabase keys: pages fall back to lib/mock data.
+  // Production always has the keys, so this never opens the live site.
+  if (process.env.NODE_ENV !== "production" && !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    return NextResponse.next();
+  }
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
