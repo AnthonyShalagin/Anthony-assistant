@@ -1,6 +1,6 @@
 """Home Control Telegram Bot — LLM-powered natural language.
 
-Controls SmartRent thermostat, lock, and sensors via Telegram.
+Controls SmartRent thermostat, lock, and sensors, plus the Ecovacs vacuum, via Telegram.
 Uses Claude (via OpenRouter) with function calling to understand
 natural language.
 """
@@ -25,6 +25,7 @@ from smart_home import (
     get_lock_status, set_lock,
     get_sensor_status, run_async,
 )
+from vacuum import start_clean, get_status as vacuum_get_status, list_rooms, pause, resume, dock
 from schedules import (
     init_db, add_schedule, add_lock_schedule, delete_schedule,
     list_schedules, get_due_schedules,
@@ -57,6 +58,7 @@ MAX_HISTORY_TURNS = 6
 SYSTEM_PROMPT = """You are the Home Control assistant — a focused agent for Anthony's apartment. You control:
 - Honeywell thermostat (via SmartRent)
 - Yale front door lock (via SmartRent)
+- Ecovacs Deebot robot vacuum and mop ("Robocleaner")
 - Leak sensors (via SmartRent)
 
 Rules:
@@ -65,7 +67,10 @@ Rules:
 - For "set temp to X every Y" use schedule_add. For "set temp to X" (now) use thermostat_set.
 - For complex requests like "set 72 on weekdays, 68 on weekends" call schedule_add TWICE.
 - For day-specific schedules, use the days param: "weekdays", "weekends", "daily", or comma-separated days.
-- Don't restate obvious info. Just confirm what you did."""
+- Don't restate obvious info. Just confirm what you did.
+- Vacuum: start cleaning immediately, no confirmation. Leave mode, suction and water unset unless asked, so the app's settings apply.
+  Mode words: "just vacuum" = vacuum, "mop" or "vacuum and mop" = both, "mop after vacuuming" = mop_after.
+  If a room name doesn't match, call vacuum_rooms and suggest the closest one."""
 
 
 # ---- Tools ----
@@ -98,6 +103,20 @@ def _tool_schedule_list() -> dict:
 
 def _tool_schedule_delete(name: str) -> dict:
     return {"success": True, "message": delete_schedule(name)}
+
+def _tool_vacuum_status() -> dict:
+    return run_async(vacuum_get_status())
+
+def _tool_vacuum_rooms() -> dict:
+    return {"rooms": run_async(list_rooms())}
+
+def _tool_vacuum_clean(rooms: Optional[list[str]] = None, mode: Optional[str] = None,
+                       suction: Optional[str] = None, water: Optional[str] = None) -> dict:
+    return {"success": True, "message": run_async(start_clean(rooms, mode, suction, water))}
+
+def _tool_vacuum_control(action: str) -> dict:
+    fn = {"pause": pause, "resume": resume, "dock": dock}[action]
+    return {"success": True, "message": run_async(fn())}
 
 
 TOOLS = [
@@ -207,9 +226,57 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "vacuum_status",
+            "description": "Robot vacuum state (cleaning, docked...), battery, cleaning mode and suction.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vacuum_rooms",
+            "description": "List the room names on the vacuum's map.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vacuum_clean",
+            "description": "Start the robot vacuum. Omit rooms for the whole home. Omit mode/suction/water to keep the app's settings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rooms": {"type": "array", "items": {"type": "string"}, "description": "Room names from the map."},
+                    "mode": {"type": "string", "enum": ["vacuum", "both", "mop_after", "mop_only"]},
+                    "suction": {"type": "string", "enum": ["quiet", "standard", "strong", "max"]},
+                    "water": {"type": "string", "enum": ["low", "medium", "high", "highest"]},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vacuum_control",
+            "description": "Pause, resume, or send the vacuum back to its dock (stops cleaning).",
+            "parameters": {
+                "type": "object",
+                "properties": {"action": {"type": "string", "enum": ["pause", "resume", "dock"]}},
+                "required": ["action"],
+            },
+        },
+    },
 ]
 
 TOOL_HANDLERS = {
+    "vacuum_status": _tool_vacuum_status,
+    "vacuum_rooms": _tool_vacuum_rooms,
+    "vacuum_clean": _tool_vacuum_clean,
+    "vacuum_control": _tool_vacuum_control,
     "thermostat_status": _tool_thermostat_status,
     "thermostat_set": _tool_thermostat_set,
     "lock_status": _tool_lock_status,

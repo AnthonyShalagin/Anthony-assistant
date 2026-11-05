@@ -199,6 +199,46 @@ def home_sensors() -> dict:
         return {"success": False, "message": f"Sensor error: {e}"}
 
 
+# ---------- HOME (Ecovacs vacuum) ----------
+
+def home_vacuum_status() -> dict:
+    """Robot vacuum state, battery, mode and suction."""
+    try:
+        from vacuum import get_status
+        return {"success": True, "data": _run_async(get_status())}
+    except Exception as e:
+        return {"success": False, "message": f"Vacuum status error: {e}"}
+
+
+def home_vacuum_rooms() -> dict:
+    """Room names on the vacuum's map."""
+    try:
+        from vacuum import list_rooms
+        return {"success": True, "data": _run_async(list_rooms())}
+    except Exception as e:
+        return {"success": False, "message": f"Vacuum rooms error: {e}"}
+
+
+def home_vacuum_clean(rooms: list[str] | None = None, mode: str | None = None,
+                      suction: str | None = None, water: str | None = None) -> dict:
+    """Start cleaning the whole home or named rooms."""
+    try:
+        from vacuum import start_clean
+        return {"success": True, "message": _run_async(start_clean(rooms, mode, suction, water))}
+    except Exception as e:
+        return {"success": False, "message": f"Vacuum clean error: {e}"}
+
+
+def home_vacuum_control(action: str) -> dict:
+    """Pause, resume, or dock the vacuum."""
+    try:
+        import vacuum
+        fn = {"pause": vacuum.pause, "resume": vacuum.resume, "dock": vacuum.dock}[action]
+        return {"success": True, "message": _run_async(fn())}
+    except Exception as e:
+        return {"success": False, "message": f"Vacuum {action} error: {e}"}
+
+
 def home_schedule_add(name: str, temperature: int, mode: str, time: str, days: str = "daily") -> dict:
     """Create a recurring thermostat schedule."""
     try:
@@ -399,6 +439,50 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "home_vacuum_status",
+            "description": "Robot vacuum state (cleaning, docked...), battery, cleaning mode and suction.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "home_vacuum_rooms",
+            "description": "List the room names on the vacuum's map.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "home_vacuum_clean",
+            "description": "Start the robot vacuum. Omit rooms for the whole home. Omit mode/suction/water to keep the app's settings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rooms": {"type": "array", "items": {"type": "string"}, "description": "Room names from the map."},
+                    "mode": {"type": "string", "enum": ["vacuum", "both", "mop_after", "mop_only"]},
+                    "suction": {"type": "string", "enum": ["quiet", "standard", "strong", "max"]},
+                    "water": {"type": "string", "enum": ["low", "medium", "high", "highest"]},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "home_vacuum_control",
+            "description": "Pause, resume, or send the vacuum back to its dock (stops cleaning).",
+            "parameters": {
+                "type": "object",
+                "properties": {"action": {"type": "string", "enum": ["pause", "resume", "dock"]}},
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "home_sensors",
             "description": "Check status of leak/motion/etc sensors.",
             "parameters": {"type": "object", "properties": {}},
@@ -527,6 +611,10 @@ TOOL_HANDLERS = {
     "home_lock_status": home_lock_status,
     "home_lock_set": home_lock_set,
     "home_sensors": home_sensors,
+    "home_vacuum_status": home_vacuum_status,
+    "home_vacuum_rooms": home_vacuum_rooms,
+    "home_vacuum_clean": home_vacuum_clean,
+    "home_vacuum_control": home_vacuum_control,
     "home_schedule_add": home_schedule_add,
     "home_lock_schedule_add": home_lock_schedule_add,
     "home_schedule_list": home_schedule_list,
