@@ -11,7 +11,7 @@ no regex for natural language.
 
 Layout:
 - `jarvis/` — master bot, all tools
-- `home-bot/` — SmartRent (thermostat, lock, sensors) and the Ecovacs vacuum (`vacuum.py`, also a CLI)
+- `home-bot/` — SmartRent (thermostat, lock, sensors), the Ecovacs vacuum (`vacuum.py`), and Google Home via typed Assistant commands (`assistant.py`); both are also CLIs
 - `genesis-bot/` — Genesis GV70 (has a Node.js bluelinky sidecar)
 - `health-agent/` — Oura, Whoop, Strong CSV
 
